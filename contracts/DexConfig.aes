@@ -60,7 +60,8 @@ main contract DexConfig =
         require(protocol_fee_rate =< fee_rate_denominator, "PROTOCOL_FEE_TOO_HIGH")
         require(fund_fee_rate =< fee_rate_denominator, "FUND_FEE_TOO_HIGH")
         require(protocol_fee_rate + fund_fee_rate =< fee_rate_denominator, "COMBINED_FEE_TOO_HIGH")
-        require(tick_spacing >= 0, "INVALID_TICK_SPACING")
+        require(trade_fee_rate =< 100_000, "TRADE_FEE_EXCEEDS_10_PERCENT")
+        require(tick_spacing > 0, "INVALID_TICK_SPACING")
         let idx = state.next_index
         let cfg = {
             index = idx,
@@ -90,8 +91,12 @@ main contract DexConfig =
             5 => cfg { tick_spacing = value }
             6 => cfg { disabled = value != 0 }
             _ => abort("INVALID_PARAM")
+        require(updated.trade_fee_rate =< 100_000, "TRADE_FEE_EXCEEDS_10_PERCENT")
         require(updated.trade_fee_rate + updated.creator_fee_rate < fee_rate_denominator, "FEE_TOO_HIGH")
+        require(updated.protocol_fee_rate =< fee_rate_denominator, "PROTOCOL_FEE_TOO_HIGH")
+        require(updated.fund_fee_rate =< fee_rate_denominator, "FUND_FEE_TOO_HIGH")
         require(updated.protocol_fee_rate + updated.fund_fee_rate =< fee_rate_denominator, "COMBINED_FEE_TOO_HIGH")
+        require(updated.tick_spacing > 0, "INVALID_TICK_SPACING")
         put(state { configs[index] = updated })
         Chain.event(ConfigUpdated(index, param, value))
 
