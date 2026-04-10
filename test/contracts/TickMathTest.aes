@@ -1,0 +1,11 @@
+@compiler >= 8
+
+include "../../contracts/lib/TickMath.aes"
+
+main contract TickMathTest =
+    entrypoint get_sqrt_price_at_tick(tick: int) : int = TickMath.get_sqrt_price_at_tick(tick)
+    entrypoint get_tick_at_sqrt_price(sqrt_price: int) : int = TickMath.get_tick_at_sqrt_price(sqrt_price)
+    entrypoint min_tick() : int = TickMath.min_tick
+    entrypoint max_tick() : int = TickMath.max_tick
+    entrypoint min_sqrt_price() : int = TickMath.min_sqrt_price
+    entrypoint max_sqrt_price() : int = TickMath.max_sqrt_price
