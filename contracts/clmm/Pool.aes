@@ -588,8 +588,11 @@ main contract Pool =
     // Flips fee-growth-outside accumulators when price crosses an initialized tick
     stateful function cross_tick(tick_index: int, fee_growth_global_input: int, zero_for_one: bool) =
         let tick = Map.lookup_default(tick_index, state.ticks, default_tick())
-        let new_outside_0 = state.fee_growth_global_0 - tick.fee_growth_outside_0
-        let new_outside_1 = state.fee_growth_global_1 - tick.fee_growth_outside_1
+        let (fg0, fg1) =
+            if(zero_for_one) (fee_growth_global_input, state.fee_growth_global_1)
+            else (state.fee_growth_global_0, fee_growth_global_input)
+        let new_outside_0 = fg0 - tick.fee_growth_outside_0
+        let new_outside_1 = fg1 - tick.fee_growth_outside_1
         put(state { ticks[tick_index] = tick { fee_growth_outside_0 = new_outside_0, fee_growth_outside_1 = new_outside_1 } })
 
     // Core removal logic: computes owed amounts, updates ticks, and settles accrued fees
