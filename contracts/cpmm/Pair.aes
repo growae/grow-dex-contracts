@@ -47,7 +47,7 @@ main contract Pair =
         locked            : bool               // Reentrancy guard
         }
 
-    let minimum_liquidity = 100                // Dead shares burned on first deposit to resist inflation attacks
+    let minimum_liquidity = 1000               // Dead shares burned on first deposit to resist inflation attacks
     let q32 = 4294967296                       // 2^32 — fixed-point multiplier for Q32.32 oracle prices
     let observation_num = 100                  // Maximum ring-buffer slots for TWAP observations
     let observation_update_duration = 15       // Minimum seconds between oracle observation writes
