@@ -16,7 +16,7 @@ payable main contract Router =
     entrypoint init(factory: IPairFactory, wae: IWAE) = {
         factory = factory,
         wae = wae
-    }
+        }
 
     // --- CPMM Swaps ---
 

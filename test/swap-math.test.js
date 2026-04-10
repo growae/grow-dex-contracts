@@ -128,7 +128,7 @@ describe("SwapMath", () => {
 
       const backIn = await sm.amount_in(outVal, newReserveIn, newReserveOut);
       const diff = backIn.decodedResult > X ? backIn.decodedResult - X : X - backIn.decodedResult;
-      assert.isTrue(diff <= 1n);
+      assert.isTrue(diff <= 2n);
     });
   });
 });

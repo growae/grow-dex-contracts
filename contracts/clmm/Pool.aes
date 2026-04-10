@@ -100,7 +100,7 @@ main contract Pool =
         next_position_id = 0,
         status = 0,
         open_time = open_time
-    }
+        }
 
     // --- Read entrypoints ---
 
@@ -174,7 +174,7 @@ main contract Pool =
             fee_growth_inside_last_1 = fg1,
             tokens_owed_0 = 0,
             tokens_owed_1 = 0
-        }
+            }
         put(state { positions[pos_id] = pos, next_position_id = pos_id + 1 })
         Chain.event(PositionOpened(Call.caller, pos_id, tick_lower, tick_upper, liquidity_desired, a0, a1))
         pos_id
@@ -330,7 +330,7 @@ main contract Pool =
             fund_fee = 0,
             liq = state.liquidity,
             ticks_crossed = 0
-        }
+            }
 
         let final_s = swap_loop(initial, zero_for_one, is_exact_input, sqrt_price_limit_x64, fee_cfg)
 

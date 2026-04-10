@@ -25,7 +25,7 @@ main contract TestToken =
         total_supply = initial_supply,
         balances = { [Call.caller] = initial_supply },
         allowances = {}
-    }
+        }
 
     entrypoint meta_info() : meta_info = state.meta_info
     entrypoint total_supply() : int = state.total_supply
