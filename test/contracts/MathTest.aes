@@ -1,0 +1,12 @@
+@compiler >= 8
+
+include "../../contracts/lib/Math.aes"
+
+main contract MathTest =
+    entrypoint min(x: int, y: int) : int = Math.min(x, y)
+    entrypoint max(x: int, y: int) : int = Math.max(x, y)
+    entrypoint abs(x: int) : int = Math.abs(x)
+    entrypoint ceil_div(a: int, b: int) : int = Math.ceil_div(a, b)
+    entrypoint mul_div(a: int, b: int, denom: int) : int = Math.mul_div(a, b, denom)
+    entrypoint mul_div_ceil(a: int, b: int, denom: int) : int = Math.mul_div_ceil(a, b, denom)
+    entrypoint sqrt(y: int) : int = Math.sqrt(y)
