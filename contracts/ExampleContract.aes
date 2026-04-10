@@ -1,0 +1,16 @@
+@compiler >= 6
+
+main contract Example =
+  type state = option(int)
+
+  datatype event = SetXEvent(address, int)
+  entrypoint init() : state = None
+
+  stateful entrypoint set(x : int) : unit =
+    Chain.event(SetXEvent(Call.caller, x))
+    put(Some(x))
+
+  entrypoint get() : int =
+    switch(state)
+      None => abort("NOTHING_SET_YET")
+      Some(var) => var

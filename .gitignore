@@ -1,0 +1,8 @@
+.aeproject-store
+.DS_Store
+node_modules
+.aeproject-store
+*.aes.js
+test/data/*
+build/
+.env
