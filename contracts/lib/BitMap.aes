@@ -1,31 +1,62 @@
 @compiler >= 8
 
 namespace BitMap =
-    // True if the tick-spacing slot for bit_pos is marked initialized in this bitmap word.
-    function is_initialized(bitmap: int, bit_pos: int) : bool =
-        (bitmap band (1 << bit_pos)) != 0
+    let word_size = 256
+    let max_search_words = 10
 
-    // XOR toggles the tick bit when liquidity is added or fully removed at that spacing index.
-    function flip_bit(bitmap: int, bit_pos: int) : int =
-        bitmap bxor (1 << bit_pos)
+    // Splits a global bit position into (word_index, bit_within_word).
+    // Negative bit positions map to negative word indices with bit_index in [0, 255].
+    function position(bit_pos: int) : (int * int) =
+        let word_index = if(bit_pos >= 0) bit_pos / word_size
+                         else -((-bit_pos - 1) / word_size + 1)
+        let bit_index = bit_pos - word_index * word_size
+        (word_index, bit_index)
 
-    // MSB among bits [0..bit_pos]: nearest initialized tick at or below bit_pos (None if empty prefix).
-    function next_initialized_bit_lte(bitmap: int, bit_pos: int) : option(int) =
-        if(bit_pos < 0) None
+    function is_initialized(bitmap: map(int, int), bit_pos: int) : bool =
+        let (wi, bi) = position(bit_pos)
+        let word = Map.lookup_default(wi, bitmap, 0)
+        (word band (1 << bi)) != 0
+
+    function flip_bit(bitmap: map(int, int), bit_pos: int) : map(int, int) =
+        let (wi, bi) = position(bit_pos)
+        let word = Map.lookup_default(wi, bitmap, 0)
+        let new_word = word bxor (1 << bi)
+        if(new_word == 0) Map.delete(wi, bitmap)
+        else bitmap { [wi] = new_word }
+
+    // Nearest initialized bit at or below bit_pos (searches current word then walks down)
+    function next_initialized_bit_lte(bitmap: map(int, int), bit_pos: int) : option(int) =
+        let (wi, bi) = position(bit_pos)
+        let word = Map.lookup_default(wi, bitmap, 0)
+        let mask = (1 << (bi + 1)) - 1
+        let masked = word band mask
+        if(masked != 0) Some(wi * word_size + msb(masked))
+        else search_words_down(bitmap, wi - 1, max_search_words)
+
+    // Nearest initialized bit at or above bit_pos (searches current word then walks up)
+    function next_initialized_bit_gte(bitmap: map(int, int), bit_pos: int) : option(int) =
+        let (wi, bi) = position(bit_pos)
+        let word = Map.lookup_default(wi, bitmap, 0)
+        let mask = bnot((1 << bi) - 1)
+        let masked = word band mask
+        if(masked != 0) Some(wi * word_size + lsb(masked))
+        else search_words_up(bitmap, wi + 1, max_search_words)
+
+    private function search_words_down(bitmap: map(int, int), wi: int, remaining: int) : option(int) =
+        if(remaining == 0) None
         else
-            let mask = (1 << (bit_pos + 1)) - 1
-            let masked = bitmap band mask
-            if(masked == 0) None
-            else Some(msb(masked))
+            let word = Map.lookup_default(wi, bitmap, 0)
+            if(word != 0) Some(wi * word_size + msb(word))
+            else search_words_down(bitmap, wi - 1, remaining - 1)
 
-    // LSB among bits ≥ bit_pos: nearest initialized tick at or above bit_pos (None if no upper bits set).
-    function next_initialized_bit_gte(bitmap: int, bit_pos: int) : option(int) =
-        let mask = bnot((1 << bit_pos) - 1)
-        let masked = bitmap band mask
-        if(masked == 0) None
-        else Some(lsb(masked))
+    private function search_words_up(bitmap: map(int, int), wi: int, remaining: int) : option(int) =
+        if(remaining == 0) None
+        else
+            let word = Map.lookup_default(wi, bitmap, 0)
+            if(word != 0) Some(wi * word_size + lsb(word))
+            else search_words_up(bitmap, wi + 1, remaining - 1)
 
-    // Index of highest set bit via repeated right shift (log2 floor for positive x).
+    // Index of highest set bit (log2 floor for positive x)
     function msb(x: int) : int =
         require(x > 0, "MSB_OF_ZERO")
         msb_loop(x, 0)
@@ -34,7 +65,7 @@ namespace BitMap =
         if(x =< 1) bit
         else msb_loop(x >> 1, bit + 1)
 
-    // Index of lowest set bit via repeated shift until bit 0 is set.
+    // Index of lowest set bit
     function lsb(x: int) : int =
         require(x > 0, "LSB_OF_ZERO")
         lsb_loop(x, 0)
