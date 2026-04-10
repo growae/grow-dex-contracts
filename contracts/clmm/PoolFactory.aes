@@ -11,7 +11,7 @@ main contract PoolFactory =
         pool_model  : Pool,
         pools       : map(address * address * int, Pool),
         all_pools   : list(Pool)
-    }
+        }
 
     datatype event
         = PoolCreated(IAEX9, IAEX9, Pool, int)

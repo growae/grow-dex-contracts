@@ -16,19 +16,19 @@ main contract Farm =
         last_update_time     : int,
         acc_reward_per_share : int,
         total_staked         : int
-    }
+        }
 
     record user_info = {
         staked_amount : int,
         reward_debt   : int
-    }
+        }
 
     record state = {
         admin        : address,
         farms        : map(int, farm_pool),
         user_stakes  : map(int * address, user_info),
         next_farm_id : int
-    }
+        }
 
     datatype event
         = FarmCreated(int, IAEX9, IAEX9, int)

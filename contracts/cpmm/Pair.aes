@@ -40,7 +40,7 @@ main contract Pair =
         status            : int,
         open_time         : int,
         locked            : bool
-    }
+        }
 
     let MINIMUM_LIQUIDITY : int = 100
     let Q32 : int = 4294967296

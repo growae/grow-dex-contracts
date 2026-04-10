@@ -10,7 +10,7 @@ contract interface IDexConfig =
         create_pool_fee  : int,
         tick_spacing     : int,
         disabled         : bool
-    }
+        }
     entrypoint get_config : (int) => fee_config
     entrypoint protocol_owner : () => address
     entrypoint fund_owner : () => address
