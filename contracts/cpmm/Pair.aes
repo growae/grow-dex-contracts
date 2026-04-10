@@ -375,11 +375,12 @@ main contract Pair =
 
     // Sends any excess token balance beyond reserves + accrued fees to recipient
     stateful entrypoint skim(to: address) : unit =
-        let (er0, er1) = effective_reserves()
         let bal0 = get_balance_0()
         let bal1 = get_balance_1()
-        let excess0 = bal0 - er0 - state.protocol_fees_0 - state.fund_fees_0 - state.creator_fees_0
-        let excess1 = bal1 - er1 - state.protocol_fees_1 - state.fund_fees_1 - state.creator_fees_1
+        let expected0 = state.reserve0 + state.protocol_fees_0 + state.fund_fees_0 + state.creator_fees_0
+        let expected1 = state.reserve1 + state.protocol_fees_1 + state.fund_fees_1 + state.creator_fees_1
+        let excess0 = bal0 - expected0
+        let excess1 = bal1 - expected1
         if(excess0 > 0) state.token0.transfer(to, excess0)
         if(excess1 > 0) state.token1.transfer(to, excess1)
 
