@@ -1,4 +1,8 @@
+// Callback interface for flash-swap-style interactions
+// The pool calls this on the initiator after transferring output tokens
 @compiler >= 8
 
 contract interface ISwapCallback =
+    // Called by the pool after a swap; the recipient must return the owed input tokens
+    // (sender, amount0_delta, amount1_delta)
     stateful entrypoint swap_callback : (address, int, int) => unit

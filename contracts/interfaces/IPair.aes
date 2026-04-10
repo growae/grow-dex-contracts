@@ -1,23 +1,42 @@
+// CPMM (Constant Product Market Maker) pair contract interface
+// Each pair holds two AEX-9 tokens and issues LP tokens to liquidity providers
 @compiler >= 8
 
 include "./IAEX9.aes"
 include "./IDexConfig.aes"
 
 contract interface IPair =
+    // Snapshot of both token reserves and the last oracle update timestamp
     record reserves = { reserve0: int, reserve1: int, block_timestamp_last: int }
+    // Initializes the pair with config, fee tier index, token addresses, creator, and open time
     entrypoint init : (IDexConfig, int, IAEX9, IAEX9, address, int) => unit
+    // Returns the first token in the canonical pair ordering
     entrypoint token_0 : () => IAEX9
+    // Returns the second token in the canonical pair ordering
     entrypoint token_1 : () => IAEX9
+    // Returns the current reserves and last block timestamp
     entrypoint get_reserves : () => reserves
+    // Total LP tokens in circulation
     entrypoint lp_total_supply : () => int
+    // LP token balance for a given address
     entrypoint lp_balance : (address) => option(int)
+    // Deposits both tokens proportionally; returns minted LP amount (amount0, amount1, min_lp)
     stateful entrypoint deposit : (int, int, int) => int
+    // Burns LP tokens and returns both underlying tokens (lp_amount, min_token0, min_token1)
     stateful entrypoint withdraw : (int, int, int) => (int * int)
+    // Exact-input swap: sells `amount_in` of `input_token`, receives at least `min_out`
     stateful entrypoint swap_base_input : (IAEX9, int, int) => int
+    // Exact-output swap: buys `amount_out` of the other token, spending at most `max_in`
     stateful entrypoint swap_base_output : (IAEX9, int, int) => int
+    // Protocol owner withdraws accrued protocol fees (max0, max1)
     stateful entrypoint collect_protocol_fee : (int, int) => (int * int)
+    // Fund owner withdraws accrued fund fees (max0, max1)
     stateful entrypoint collect_fund_fee : (int, int) => (int * int)
+    // Pool creator withdraws all accrued creator fees
     stateful entrypoint collect_creator_fee : () => (int * int)
+    // Admin sets status bitmask: bit 0 = deposit, bit 1 = withdraw, bit 2 = swap (1 = disabled)
     stateful entrypoint update_pool_status : (int) => unit
+    // Sends any excess token balance beyond reserves + fees to the given address
     stateful entrypoint skim : (address) => unit
+    // Re-reads live token balances and updates stored reserves and TWAP oracle
     stateful entrypoint sync : () => unit

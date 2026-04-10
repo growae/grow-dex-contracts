@@ -1,5 +1,13 @@
 # Grow DEX
 
+> **WARNING: USE AT YOUR OWN RISK**
+>
+> This software is a **proof of concept** demonstrating what can be built on the [Aeternity](https://aeternity.com) blockchain. It is provided strictly for educational and experimental purposes.
+>
+> **These contracts have NOT been formally audited.** They may contain bugs, vulnerabilities, or other issues that could result in the **total loss of funds**. Do not deploy to mainnet or use with real assets unless you fully understand and accept the risks.
+>
+> The authors and contributors of this project **assume no responsibility or liability** for any loss, damage, or other consequence arising from the use, deployment, or interaction with this software in any environment, including but not limited to testnet and mainnet. By using this software, you acknowledge that you do so **entirely at your own risk**.
+
 A Raydium-equivalent decentralized exchange on Aeternity, featuring both constant-product (CPMM) and concentrated-liquidity (CLMM) automated market makers, plus LP farming.
 
 ## Architecture
@@ -113,6 +121,10 @@ Production WAE addresses (reused from existing deployments):
 - **aeproject** ^5.0.0
 - **Mocha** + **Chai** for testing
 
+## Disclaimer
+
+This project is a **proof of concept** showcasing decentralized exchange functionality on the Aeternity blockchain. It is not intended for production use. The authors and contributors make **no warranties**, express or implied, regarding the safety, reliability, or fitness of this software for any purpose. Use of this software is entirely at the user's own risk, and the authors bear **no responsibility** for any financial loss, security breach, or other damage that may result from its use.
+
 ## License
 
-Proprietary — all rights reserved.
+MIT License — see [LICENSE](LICENSE) for details.

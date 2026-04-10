@@ -1,3 +1,8 @@
+// Concentrated Liquidity Market Maker (CLMM) pool contract
+// Supports ranged liquidity positions within discrete tick boundaries,
+// tick-based price traversal during swaps, and per-position fee accrual.
+// Fee revenue is split across protocol, ecosystem fund, and LP providers.
+// Uses Q64.64 fixed-point encoding for square-root prices.
 @compiler >= 8
 
 include "String.aes"
@@ -12,63 +17,66 @@ include "../lib/LiquidityMath.aes"
 include "../lib/BitMap.aes"
 
 main contract Pool =
-    let q64 = 18446744073709551616
-    let max_ticks_per_swap = 20
+    let q64 = 18446744073709551616   // 2^64 — Q64.64 fixed-point multiplier
+    let max_ticks_per_swap = 20      // Gas safety cap: max tick boundaries crossed per swap
 
+    // Per-tick accounting: tracks net/gross liquidity and fee snapshots for tick crossings
     record tick_state = {
-        liquidity_net        : int,
-        liquidity_gross      : int,
-        fee_growth_outside_0 : int,
-        fee_growth_outside_1 : int,
-        initialized          : bool
+        liquidity_net        : int,  // Signed liquidity change when this tick is crossed
+        liquidity_gross      : int,  // Total liquidity referencing this tick (for un-initialization)
+        fee_growth_outside_0 : int,  // Fee growth of token0 accumulated outside this tick
+        fee_growth_outside_1 : int,  // Fee growth of token1 accumulated outside this tick
+        initialized          : bool  // Whether this tick has any active liquidity references
         }
 
+    // Concentrated liquidity position: a range [tick_lower, tick_upper) with associated fee state
     record position = {
-        owner                      : address,
-        tick_lower                 : int,
-        tick_upper                 : int,
-        liquidity                  : int,
-        fee_growth_inside_last_0   : int,
-        fee_growth_inside_last_1   : int,
-        tokens_owed_0              : int,
-        tokens_owed_1              : int
+        owner                      : address, // Position owner
+        tick_lower                 : int,     // Lower tick boundary (inclusive)
+        tick_upper                 : int,     // Upper tick boundary (exclusive)
+        liquidity                  : int,     // Liquidity units provided by this position
+        fee_growth_inside_last_0   : int,     // Snapshot of fee_growth_inside for token0 at last update
+        fee_growth_inside_last_1   : int,     // Snapshot of fee_growth_inside for token1 at last update
+        tokens_owed_0              : int,     // Uncollected fee + withdrawal proceeds in token0
+        tokens_owed_1              : int      // Uncollected fee + withdrawal proceeds in token1
         }
 
     record state = {
-        config           : IDexConfig,
-        config_index     : int,
-        creator          : address,
-        token0           : IAEX9,
-        token1           : IAEX9,
-        tick_spacing     : int,
-        sqrt_price_x64   : int,
-        tick_current     : int,
-        liquidity        : int,
-        fee_growth_global_0 : int,
-        fee_growth_global_1 : int,
-        protocol_fees_0  : int,
-        protocol_fees_1  : int,
-        fund_fees_0      : int,
-        fund_fees_1      : int,
-        ticks            : map(int, tick_state),
-        tick_bitmap      : int,
-        positions        : map(int, position),
-        next_position_id : int,
-        status           : int,
-        open_time        : int
+        config           : IDexConfig,                 // Central fee configuration contract
+        config_index     : int,                        // Fee tier index within DexConfig
+        creator          : address,                    // Pool creator address
+        token0           : IAEX9,                      // First token (lower address)
+        token1           : IAEX9,                      // Second token (higher address)
+        tick_spacing     : int,                        // Tick granularity for this pool's fee tier
+        sqrt_price_x64   : int,                        // Current sqrt price in Q64.64 encoding
+        tick_current     : int,                        // Tick index corresponding to current price
+        liquidity        : int,                        // Total active liquidity in the current tick range
+        fee_growth_global_0 : int,                     // Cumulative fee growth per unit liquidity for token0
+        fee_growth_global_1 : int,                     // Cumulative fee growth per unit liquidity for token1
+        protocol_fees_0  : int,                        // Accrued protocol fees in token0
+        protocol_fees_1  : int,                        // Accrued protocol fees in token1
+        fund_fees_0      : int,                        // Accrued fund fees in token0
+        fund_fees_1      : int,                        // Accrued fund fees in token1
+        ticks            : map(int, tick_state),       // Tick index → tick accounting state
+        tick_bitmap      : int,                        // Bitmap tracking which tick-spacing slots are initialized
+        positions        : map(int, position),         // Position ID → position data
+        next_position_id : int,                        // Auto-incrementing position ID counter
+        status           : int,                        // Bitmask: bit 0 = positions, bit 2 = swaps (1 = disabled)
+        open_time        : int                         // Timestamp before which swaps are rejected
         }
 
     datatype event
-        = PositionOpened(address, int, int)
-        | PositionClosed(address, int)
-        | IncreaseLiquidity(int, int, int)
-        | DecreaseLiquidity(int, int, int)
-        | Swap(address, int, int)
-        | CollectFee(int, int, int)
-        | CollectProtocolFee(address, int, int)
-        | CollectFundFee(address, int, int)
-        | UpdatePoolStatus(int, int)
+        = PositionOpened(address, int, int)      // New position (owner, position_id, liquidity)
+        | PositionClosed(address, int)           // Position fully closed (owner, position_id)
+        | IncreaseLiquidity(int, int, int)       // Liquidity added (position_id, liquidity_delta, amount0)
+        | DecreaseLiquidity(int, int, int)       // Liquidity removed (position_id, liquidity_delta, amount0)
+        | Swap(address, int, int)                // Swap executed (trader, amount0, amount1)
+        | CollectFee(int, int, int)              // Position fees collected (position_id, amount0, amount1)
+        | CollectProtocolFee(address, int, int)  // Protocol fees collected (recipient, amount0, amount1)
+        | CollectFundFee(address, int, int)      // Fund fees collected (recipient, amount0, amount1)
+        | UpdatePoolStatus(int, int)             // Status bitmask changed (old, new)
 
+    // Initializes the pool — called by PoolFactory via Chain.clone
     entrypoint init(
             config: IDexConfig,
             config_index: int,
@@ -104,18 +112,28 @@ main contract Pool =
 
     // --- Read entrypoints ---
 
+    // First token in the canonical pair ordering
     entrypoint token_0() : IAEX9 = state.token0
+    // Second token in the canonical pair ordering
     entrypoint token_1() : IAEX9 = state.token1
+    // Current square-root price in Q64.64 fixed-point encoding
     entrypoint sqrt_price_x64() : int = state.sqrt_price_x64
+    // Tick index corresponding to the current price
     entrypoint tick_current() : int = state.tick_current
+    // Total active liquidity within the current tick range
     entrypoint liquidity() : int = state.liquidity
+    // Cumulative fee growth per unit of liquidity for token0 (Q64 scaled)
     entrypoint fee_growth_global_0() : int = state.fee_growth_global_0
+    // Cumulative fee growth per unit of liquidity for token1 (Q64 scaled)
     entrypoint fee_growth_global_1() : int = state.fee_growth_global_1
+    // Returns the accounting state for a specific tick (defaults if uninitialized)
     entrypoint get_tick(tick_index: int) : tick_state =
         Map.lookup_default(tick_index, state.ticks, default_tick())
+    // Returns a position's full state by ID
     entrypoint get_position(position_id: int) : position =
         require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
         state.positions[position_id]
+    // Current pool status bitmask (bit 0 = positions disabled, bit 2 = swaps disabled)
     entrypoint get_status() : int = state.status
 
     // --- Position management ---
@@ -295,16 +313,17 @@ main contract Pool =
 
     // --- Swap ---
 
+    // Mutable state threaded through the recursive swap loop
     record swap_state = {
-        amount_remaining : int,
-        amount_calculated : int,
-        sqrt_price       : int,
-        tick             : int,
-        fee_growth_global: int,
-        protocol_fee     : int,
-        fund_fee         : int,
-        liq              : int,
-        ticks_crossed    : int
+        amount_remaining : int,    // Input (or output) amount still to be consumed
+        amount_calculated : int,   // Accumulated output (or input) amount computed so far
+        sqrt_price       : int,    // Current sqrt price as the swap progresses
+        tick             : int,    // Current tick as the swap progresses
+        fee_growth_global: int,    // In-progress fee growth accumulator for the input token
+        protocol_fee     : int,    // Protocol fees collected during this swap
+        fund_fee         : int,    // Fund fees collected during this swap
+        liq              : int,    // Active liquidity at the current tick
+        ticks_crossed    : int     // Number of initialized ticks crossed (capped at max_ticks_per_swap)
         }
 
     // Executes a CLMM swap across ticks, splitting fees to protocol/fund/LP
@@ -507,9 +526,11 @@ main contract Pool =
 
     // --- Internal helpers ---
 
+    // Returns a zero-value tick state for uninitialized ticks
     function default_tick() : tick_state =
         { liquidity_net = 0, liquidity_gross = 0, fee_growth_outside_0 = 0, fee_growth_outside_1 = 0, initialized = false }
 
+    // Checks whether a specific operation is enabled via the status bitmask
     function is_enabled(bit: int) : bool =
         (state.status band (1 << bit)) == 0
 

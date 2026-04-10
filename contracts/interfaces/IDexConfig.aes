@@ -1,17 +1,23 @@
+// Central fee configuration contract interface
+// Stores multiple fee tiers that pools reference by index at runtime
 @compiler >= 8
 
 contract interface IDexConfig =
     record fee_config = {
-        index            : int,
-        trade_fee_rate   : int,
-        protocol_fee_rate: int,
-        fund_fee_rate    : int,
-        creator_fee_rate : int,
-        create_pool_fee  : int,
-        tick_spacing     : int,
-        disabled         : bool
+        index            : int,    // Unique tier identifier
+        trade_fee_rate   : int,    // Swap fee in millionths (e.g. 2500 = 0.25%)
+        protocol_fee_rate: int,    // Share of trade fee routed to the protocol treasury
+        fund_fee_rate    : int,    // Share of trade fee routed to the ecosystem fund
+        creator_fee_rate : int,    // Additional fee on the notional amount paid to pool creator
+        create_pool_fee  : int,    // One-time AE fee charged when creating a new pool
+        tick_spacing     : int,    // Minimum tick granularity for CLMM pools using this tier
+        disabled         : bool    // When true, new pools cannot be created with this tier
         }
+    // Retrieves the full fee configuration for a given tier index
     entrypoint get_config : (int) => fee_config
+    // Address that receives protocol fee revenue
     entrypoint protocol_owner : () => address
+    // Address that receives ecosystem fund fee revenue
     entrypoint fund_owner : () => address
+    // Admin address with permission to create/update fee tiers
     entrypoint admin : () => address
