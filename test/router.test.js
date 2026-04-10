@@ -19,8 +19,8 @@ describe("Router", () => {
     accounts = utils.getDefaultAccounts();
 
     config = await deployDexConfig(aeSdk);
-    // 0.3% trade fee, 20% protocol, 10% fund, 0% creator, 0 pool fee, 1 tick spacing
-    await config.create_amm_config(3000, 200000, 100000, 0, 0, 1);
+    // 0.25% trade fee, 12% protocol, 4% fund, 0.05% creator, 0 pool fee, 10 tick spacing
+    await config.create_amm_config(2500, 120000, 40000, 500, 0, 10);
 
     tokenA = await deployToken(aeSdk, "TokenA", "TKA", 18, SUPPLY);
     tokenB = await deployToken(aeSdk, "TokenB", "TKB", 18, SUPPLY);
