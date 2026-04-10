@@ -1,7 +1,8 @@
 import 'dotenv/config';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { dirname, resolve, relative } from 'path';
 import {
-  AeSdk, Node, MemoryAccount, CompilerHttp, Contract, getFileSystem,
+  AeSdk, Node, MemoryAccount, CompilerHttp, Contract,
 } from '@aeternity/aepp-sdk';
 import { ADDRESSES } from '../deploy/addresses.js';
 
@@ -34,9 +35,35 @@ const FEE_CONFIGS = [
   { name: 'Exotic',    tradeFee: 20000, protocolFee: 120000, fundFee: 40000, creatorFee: 500, poolFee: 0, tickSpacing: 120 },
 ];
 
+const STDLIB = new Set([
+  'String.aes', 'Option.aes', 'List.aes', 'Func.aes', 'Pair.aes',
+  'Set.aes', 'BLS12_381.aes', 'Frac.aes', 'AENSCompat.aes',
+]);
+
+function buildFileSystem(entryPath, collected = {}, basePath = null) {
+  const absEntry = resolve(entryPath);
+  if (!basePath) basePath = dirname(absEntry);
+  const source = readFileSync(absEntry, 'utf-8');
+  const includeRegex = /^include\s+"(.+)"/gm;
+  let match;
+  while ((match = includeRegex.exec(source)) !== null) {
+    const includePath = match[1];
+    if (STDLIB.has(includePath)) continue;
+    const absInclude = resolve(dirname(absEntry), includePath);
+    const relKey = relative(basePath, absInclude);
+    if (collected[relKey]) continue;
+    if (!existsSync(absInclude)) {
+      throw new Error(`Include not found: ${includePath} (resolved to ${absInclude})`);
+    }
+    collected[relKey] = readFileSync(absInclude, 'utf-8');
+    buildFileSystem(absInclude, collected, basePath);
+  }
+  return collected;
+}
+
 async function deployContract(aeSdk, sourcePath, args = []) {
   const sourceCode = readFileSync(sourcePath, 'utf-8');
-  const fileSystem = await getFileSystem(sourcePath);
+  const fileSystem = buildFileSystem(sourcePath);
 
   const contract = await Contract.initialize({
     ...aeSdk.getContext(),
