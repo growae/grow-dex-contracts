@@ -335,6 +335,7 @@ main contract Pool =
         require(is_enabled(2), "SWAP_DISABLED")
         require(Chain.timestamp >= state.open_time, "NOT_OPEN")
         require(amount_specified != 0, "ZERO_AMOUNT")
+        require(Math.abs(amount_specified) >= 1000, "AMOUNT_TOO_SMALL")
 
         if(zero_for_one)
             require(sqrt_price_limit_x64 < state.sqrt_price_x64, "LIMIT_TOO_HIGH")
