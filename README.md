@@ -91,7 +91,7 @@ Runs 409 tests across 13 suites covering all contracts, libraries, and edge case
 
 ## CI/CD
 
-GitHub Actions runs the full test suite on every pull request and push to `develop` or `main`. See [`.github/workflows/grow-dex.yml`](../.github/workflows/grow-dex.yml).
+GitHub Actions runs the full test suite on every pull request and push to `develop` or `main`. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ## Deployment
 

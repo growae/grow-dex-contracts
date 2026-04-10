@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start aeproject Docker stack
+        run: docker compose up -d
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for Aeternity node
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:3001/v3/status > /dev/null; then
+              echo "Aeternity node is healthy"
+              exit 0
+            fi
+            echo "Waiting for node... ($i/40)"
+            sleep 3
+          done
+          echo "Timeout waiting for Aeternity node"
+          exit 1
+
+      - name: Wait for Sophia compiler
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3080/version > /dev/null; then
+              echo "Sophia compiler is up"
+              exit 0
+            fi
+            echo "Waiting for compiler... ($i/30)"
+            sleep 2
+          done
+          echo "Timeout waiting for Sophia compiler"
+          exit 1
+
+      - name: Run tests
+        run: npm test
+
+      - name: Stop Docker stack
+        if: always()
+        run: docker compose down -v
