@@ -5,6 +5,7 @@ include "./IPair.aes"
 
 contract interface IPairFactory =
     entrypoint get_pair : (IAEX9, IAEX9) => option(IPair)
-    entrypoint all_pairs : () => list(IPair)
-    entrypoint all_pairs_length : () => int
+    entrypoint pair_count : () => int
+    entrypoint get_pair_at : (int) => IPair
+    entrypoint get_pairs : (int, int) => list(IPair)
     stateful entrypoint initialize : (IAEX9, IAEX9, int, int, int) => IPair
