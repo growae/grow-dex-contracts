@@ -1,0 +1,38 @@
+@compiler >= 8
+
+namespace Math =
+    function min(x: int, y: int): int =
+        if(x < y) x else y
+
+    function max(x: int, y: int): int =
+        if(x > y) x else y
+
+    function abs(x: int): int =
+        if(x < 0) -x else x
+
+    function ceil_div(a: int, b: int): int =
+        require(b != 0, "MATH_DIV_ZERO")
+        if(a == 0) 0
+        else (a + b - 1) / b
+
+    function mul_div(a: int, b: int, denom: int): int =
+        require(denom != 0, "MATH_DIV_ZERO")
+        (a * b) / denom
+
+    function mul_div_ceil(a: int, b: int, denom: int): int =
+        require(denom != 0, "MATH_DIV_ZERO")
+        ceil_div(a * b, denom)
+
+    function sqrt(y: int): int =
+        require(y >= 0, "MATH_NEGATIVE_SQRT")
+        if(y > 3)
+            let x = y / 2 + 1
+            loop_sqrt(y, x, y)
+        elif(y != 0) 1
+        else 0
+
+    private function loop_sqrt(y: int, x: int, z: int): int =
+        if(x < z)
+            let new_x = (y / x + x) / 2
+            loop_sqrt(y, new_x, x)
+        else z
