@@ -13,7 +13,7 @@ main contract PairFactory =
         pairs        : map(address * address, Pair),
         all_pairs    : list(Pair),
         create_pool_fee_receiver : address
-    }
+        }
 
     datatype event
         = PairCreated(IAEX9, IAEX9, Pair, int)

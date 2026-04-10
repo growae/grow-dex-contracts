@@ -10,7 +10,7 @@ main contract DexConfig =
         create_pool_fee  : int,
         tick_spacing     : int,
         disabled         : bool
-    }
+        }
 
     record state = {
         admin          : address,
@@ -18,7 +18,7 @@ main contract DexConfig =
         fund_owner     : address,
         configs        : map(int, fee_config),
         next_index     : int
-    }
+        }
 
     let FEE_RATE_DENOMINATOR : int = 1_000_000
 

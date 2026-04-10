@@ -11,7 +11,7 @@ payable main contract Router =
     record state = {
         factory : IPairFactory,
         wae     : IWAE
-    }
+        }
 
     entrypoint init(factory: IPairFactory, wae: IWAE) = {
         factory = factory,

@@ -21,7 +21,7 @@ main contract Pool =
         fee_growth_outside_0 : int,
         fee_growth_outside_1 : int,
         initialized          : bool
-    }
+        }
 
     record position = {
         owner                      : address,
@@ -32,7 +32,7 @@ main contract Pool =
         fee_growth_inside_last_1   : int,
         tokens_owed_0              : int,
         tokens_owed_1              : int
-    }
+        }
 
     record state = {
         config           : IDexConfig,
@@ -56,7 +56,7 @@ main contract Pool =
         next_position_id : int,
         status           : int,
         open_time        : int
-    }
+        }
 
     datatype event
         = PositionOpened(address, int, int, int, int, int, int)
@@ -299,7 +299,7 @@ main contract Pool =
         fund_fee         : int,
         liq              : int,
         ticks_crossed    : int
-    }
+        }
 
     stateful entrypoint swap(
             zero_for_one: bool,

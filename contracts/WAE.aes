@@ -9,7 +9,7 @@ payable main contract WAE =
     record state = {
         balances   : map(address, int),
         allowances : map(allowance_accounts, int)
-    }
+        }
 
     datatype event
         = Transfer(address, address, int)

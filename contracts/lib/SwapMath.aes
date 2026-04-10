@@ -4,7 +4,7 @@ include "./Math.aes"
 include "List.aes"
 
 namespace SwapMath =
-    let FEE_RATE_DENOMINATOR : int = 1_000_000
+    let fee_rate_denominator = 1_000_000
 
     function amount_out(amount_in: int, reserve_in: int, reserve_out: int) : int =
         require(amount_in > 0, "SWAP_INSUFFICIENT_INPUT")
