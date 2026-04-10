@@ -501,9 +501,9 @@ main contract Pool =
         require(Call.caller == state.config.protocol_owner(), "UNAUTHORIZED")
         let a0 = Math.min(amount_0_requested, state.protocol_fees_0)
         let a1 = Math.min(amount_1_requested, state.protocol_fees_1)
+        put(state { protocol_fees_0 @ f = f - a0, protocol_fees_1 @ f = f - a1 })
         if(a0 > 0) state.token0.transfer(Call.caller, a0)
         if(a1 > 0) state.token1.transfer(Call.caller, a1)
-        put(state { protocol_fees_0 @ f = f - a0, protocol_fees_1 @ f = f - a1 })
         Chain.event(CollectProtocolFee(Call.caller, a0, a1))
         (a0, a1)
 
@@ -512,9 +512,9 @@ main contract Pool =
         require(Call.caller == state.config.fund_owner(), "UNAUTHORIZED")
         let a0 = Math.min(amount_0_requested, state.fund_fees_0)
         let a1 = Math.min(amount_1_requested, state.fund_fees_1)
+        put(state { fund_fees_0 @ f = f - a0, fund_fees_1 @ f = f - a1 })
         if(a0 > 0) state.token0.transfer(Call.caller, a0)
         if(a1 > 0) state.token1.transfer(Call.caller, a1)
-        put(state { fund_fees_0 @ f = f - a0, fund_fees_1 @ f = f - a1 })
         Chain.event(CollectFundFee(Call.caller, a0, a1))
         (a0, a1)
 
