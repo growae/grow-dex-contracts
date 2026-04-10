@@ -57,6 +57,8 @@ main contract PairFactory =
         if(fee_cfg.create_pool_fee > 0)
             require(Call.value >= fee_cfg.create_pool_fee, "INSUFFICIENT_POOL_FEE")
             Chain.spend(state.create_pool_fee_receiver, fee_cfg.create_pool_fee)
+            let refund = Call.value - fee_cfg.create_pool_fee
+            if(refund > 0) Chain.spend(Call.caller, refund)
 
         let (a0, a1) = if(token_a.address == t0.address) (amount_0, amount_1) else (amount_1, amount_0)
 
