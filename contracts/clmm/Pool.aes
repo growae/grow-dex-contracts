@@ -176,8 +176,8 @@ main contract Pool =
         if(a0 > 0) state.token0.transfer_allowance(Call.caller, Contract.address, a0)
         if(a1 > 0) state.token1.transfer_allowance(Call.caller, Contract.address, a1)
 
-        update_tick(tick_lower, liquidity_desired, true)
-        update_tick(tick_upper, -liquidity_desired, true)
+        update_tick(tick_lower, liquidity_desired, false)
+        update_tick(tick_upper, -liquidity_desired, false)
 
         if(state.tick_current >= tick_lower && state.tick_current < tick_upper)
             put(state { liquidity @ l = l + liquidity_desired })
@@ -557,10 +557,13 @@ main contract Pool =
          state.fee_growth_global_1 - fee_below_1 - fee_above_1)
 
     // Updates tick liquidity and initializes fee-growth-outside on first reference
-    stateful function update_tick(tick_index: int, liquidity_delta: int, is_upper_inverted: bool) =
+    stateful function update_tick(tick_index: int, liquidity_delta: int, is_removal: bool) =
         let tick = Map.lookup_default(tick_index, state.ticks, default_tick())
         let was_initialized = tick.initialized
-        let new_gross = tick.liquidity_gross + Math.abs(liquidity_delta)
+        let abs_delta = Math.abs(liquidity_delta)
+        let new_gross = if(is_removal) tick.liquidity_gross - abs_delta
+                        else tick.liquidity_gross + abs_delta
+        require(new_gross >= 0, "GROSS_UNDERFLOW")
         let new_net = tick.liquidity_net + liquidity_delta
 
         let (fo0, fo1) =
