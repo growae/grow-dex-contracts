@@ -1,0 +1,18 @@
+// CPMM pair factory interface
+// Deploys new Pair contracts via Chain.clone and maintains a paginated registry
+@compiler >= 8
+
+include "./IAEX9.aes"
+include "./IPair.aes"
+
+contract interface IPairFactory =
+    // Looks up an existing pair by its two tokens (order-independent)
+    entrypoint get_pair : (IAEX9, IAEX9) => option(IPair)
+    // Total number of pairs created through this factory
+    entrypoint pair_count : () => int
+    // Returns the pair at a specific zero-based index
+    entrypoint get_pair_at : (int) => IPair
+    // Paginated retrieval: returns up to `limit` pairs starting from `offset`
+    entrypoint get_pairs : (int, int) => list(IPair)
+    // Creates a new pair with seed liquidity (tokenA, tokenB, amountA, amountB, open_time)
+    stateful entrypoint initialize : (IAEX9, IAEX9, int, int, int) => IPair

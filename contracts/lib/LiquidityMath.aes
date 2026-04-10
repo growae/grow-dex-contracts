@@ -1,0 +1,85 @@
+@compiler >= 8
+
+include "./Math.aes"
+
+namespace LiquidityMath =
+    let q64 = 18446744073709551616
+
+    // Token0 moved when sqrt price crosses the band at fixed L (Q64.64 prices).
+    // Δx = L × Q64 × (√P_upper - √P_lower) / (√P_lower × √P_upper)
+    function get_delta_amount_0(sqrt_price_a: int, sqrt_price_b: int, liquidity: int, round_up: bool) : int =
+        let (lower, upper) = if(sqrt_price_a < sqrt_price_b) (sqrt_price_a, sqrt_price_b) else (sqrt_price_b, sqrt_price_a)
+        require(lower > 0, "ZERO_PRICE")
+        let numerator = liquidity * q64 * (upper - lower)
+        let denominator = upper * lower
+        if(round_up) Math.ceil_div(numerator, denominator)
+        else numerator / denominator
+
+    // Token1 moved when sqrt price crosses the band at fixed L.
+    // Δy = L × (√P_upper - √P_lower) / Q64
+    function get_delta_amount_1(sqrt_price_a: int, sqrt_price_b: int, liquidity: int, round_up: bool) : int =
+        let (lower, upper) = if(sqrt_price_a < sqrt_price_b) (sqrt_price_a, sqrt_price_b) else (sqrt_price_b, sqrt_price_a)
+        let product = liquidity * (upper - lower)
+        if(round_up) Math.ceil_div(product, q64)
+        else product / q64
+
+    // Max L implied by depositing amount of token0 across [lower, upper].
+    // L from Δx: L = Δx × √P_lower × √P_upper / ((√P_upper - √P_lower) × Q64)
+    function get_liquidity_from_amount_0(sqrt_price_a: int, sqrt_price_b: int, amount: int) : int =
+        let (lower, upper) = if(sqrt_price_a < sqrt_price_b) (sqrt_price_a, sqrt_price_b) else (sqrt_price_b, sqrt_price_a)
+        require(upper > lower, "IDENTICAL_PRICES")
+        amount * lower * upper / ((upper - lower) * q64)
+
+    // Max L implied by depositing amount of token1 across [lower, upper].
+    // L from Δy: L = Δy × Q64 / (√P_upper - √P_lower)
+    function get_liquidity_from_amount_1(sqrt_price_a: int, sqrt_price_b: int, amount: int) : int =
+        let (lower, upper) = if(sqrt_price_a < sqrt_price_b) (sqrt_price_a, sqrt_price_b) else (sqrt_price_b, sqrt_price_a)
+        require(upper > lower, "IDENTICAL_PRICES")
+        amount * q64 / (upper - lower)
+
+    // Position L is the min of token0- and token1-implied L depending where current price sits in the range.
+    function get_liquidity_from_amounts(
+            sqrt_price: int,
+            sqrt_price_a: int,
+            sqrt_price_b: int,
+            amount_0: int,
+            amount_1: int
+        ) : int =
+        let (lower, upper) = if(sqrt_price_a < sqrt_price_b) (sqrt_price_a, sqrt_price_b) else (sqrt_price_b, sqrt_price_a)
+        if(sqrt_price =< lower)
+            get_liquidity_from_amount_0(lower, upper, amount_0)
+        elif(sqrt_price < upper)
+            Math.min(
+                get_liquidity_from_amount_0(sqrt_price, upper, amount_0),
+                get_liquidity_from_amount_1(lower, sqrt_price, amount_1))
+        else
+            get_liquidity_from_amount_1(lower, upper, amount_1)
+
+    // Signed liquidity change with underflow guard (delta may be negative on burn).
+    function add_delta(liquidity: int, delta: int) : int =
+        let result = liquidity + delta
+        require(result >= 0, "LIQUIDITY_UNDERFLOW")
+        result
+
+    // Token0 moves price along x·√P = L·Q64; remove uses ceil so the pool never over-pays token0 on rounding.
+    // √P_new = L × Q64 × √P / (L × Q64 + Δx × √P)
+    function get_next_sqrt_price_from_amount_0(sqrt_price: int, liquidity: int, amount: int, add: bool) : int =
+        if(amount == 0) sqrt_price
+        else
+            let product = amount * sqrt_price
+            if(add)
+                let denominator = liquidity * q64 + product
+                liquidity * q64 * sqrt_price / denominator
+            else
+                let denominator = liquidity * q64 - product
+                require(denominator > 0, "PRICE_UNDERFLOW")
+                Math.ceil_div(liquidity * q64 * sqrt_price, denominator)
+
+    // Token1 shifts sqrt price linearly in Q64 space; subtract path checks price does not cross zero.
+    // √P_new = √P + Δy × Q64 / L  (or minus)
+    function get_next_sqrt_price_from_amount_1(sqrt_price: int, liquidity: int, amount: int, add: bool) : int =
+        let delta = amount * q64 / liquidity
+        if(add) sqrt_price + delta
+        else
+            require(sqrt_price > delta, "PRICE_UNDERFLOW")
+            sqrt_price - delta

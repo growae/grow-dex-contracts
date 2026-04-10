@@ -1,0 +1,474 @@
+// Constant-Product Market Maker (CPMM) pair contract
+// Holds two AEX-9 tokens, issues LP tokens, and executes x*y=k swaps.
+// Fees are split across protocol, fund, and pool creator.
+// Includes a TWAP oracle backed by a ring-buffer of price observations.
+@compiler >= 8
+
+include "String.aes"
+include "Option.aes"
+include "../interfaces/IAEX9.aes"
+include "../interfaces/IDexConfig.aes"
+include "../lib/Math.aes"
+include "../lib/FeeMath.aes"
+include "../lib/SwapMath.aes"
+include "../lib/Oracle.aes"
+
+main contract Pair =
+    // AEX-9 allowance key: who granted and who may spend
+    record allowance_accounts = { from_account: address, for_account: address }
+
+    record state = {
+        factory           : address,           // Address of the PairFactory that deployed this pair
+        config            : IDexConfig,        // Reference to the central fee configuration contract
+        config_index      : int,               // Fee tier index within DexConfig
+        creator           : address,           // Pool creator — receives creator fees
+        token0            : IAEX9,             // First token (lower address after canonical sort)
+        token1            : IAEX9,             // Second token (higher address)
+        reserve0          : int,               // Last snapshotted reserve of token0
+        reserve1          : int,               // Last snapshotted reserve of token1
+        block_timestamp_last : int,            // Timestamp of last reserve/oracle update
+        price0_cumulative_last : int,          // Cumulative Q32 price of token0 (for TWAP)
+        price1_cumulative_last : int,          // Cumulative Q32 price of token1 (for TWAP)
+        total_supply      : int,               // Total LP tokens in circulation
+        balance_of        : map(address, int), // LP token balances per address
+        allowances        : map(allowance_accounts, int), // LP token spend allowances
+        locked_liquidity  : int,               // Permanently locked LP (dead shares for inflation resistance)
+        protocol_fees_0   : int,               // Accrued protocol fees in token0
+        protocol_fees_1   : int,               // Accrued protocol fees in token1
+        fund_fees_0       : int,               // Accrued fund fees in token0
+        fund_fees_1       : int,               // Accrued fund fees in token1
+        creator_fees_0    : int,               // Accrued creator fees in token0
+        creator_fees_1    : int,               // Accrued creator fees in token1
+        observations      : map(int, PriceOracle.observation), // Ring-buffer TWAP observations
+        observation_index : int,               // Current write position in the ring buffer
+        observation_count : int,               // Number of recorded observations (capped at observation_num)
+        status            : int,               // Bitmask: bit 0 = deposit, bit 1 = withdraw, bit 2 = swap (1 = disabled)
+        open_time         : int,               // Timestamp before which swaps are rejected
+        locked            : bool               // Reentrancy guard
+        }
+
+    let minimum_liquidity = 100                // Dead shares burned on first deposit to resist inflation attacks
+    let q32 = 4294967296                       // 2^32 — fixed-point multiplier for Q32.32 oracle prices
+    let observation_num = 100                  // Maximum ring-buffer slots for TWAP observations
+    let observation_update_duration = 15       // Minimum seconds between oracle observation writes
+
+    datatype event
+        = Transfer(address, address, int)      // LP token transfer (from, to, amount)
+        | Approval(address, address, int)      // LP token allowance granted (owner, spender, amount)
+        | Deposit(address, int, int)           // Liquidity added (provider, amount0, amount1)
+        | Withdraw(address, int, int)          // Liquidity removed (provider, amount0, amount1)
+        | SwapInput(address, int, int)         // Exact-input swap (trader, amount_in, amount_out)
+        | SwapOutput(address, int, int)        // Exact-output swap (trader, amount_in, amount_out)
+        | Sync(int, int)                       // Reserves updated (reserve0, reserve1)
+        | CollectProtocolFee(address, int, int)  // Protocol fees collected (recipient, amount0, amount1)
+        | CollectFundFee(address, int, int)       // Fund fees collected (recipient, amount0, amount1)
+        | CollectCreatorFee(address, int, int)    // Creator fees collected (recipient, amount0, amount1)
+        | UpdatePoolStatus(int, int)             // Status bitmask changed (old_status, new_status)
+
+    // Initializes the pair — called by PairFactory via Chain.clone
+    entrypoint init(
+            config: IDexConfig,
+            config_index: int,
+            token0: IAEX9,
+            token1: IAEX9,
+            creator: address,
+            open_time: int
+        ) = {
+        factory = Call.caller,
+        config = config,
+        config_index = config_index,
+        creator = creator,
+        token0 = token0,
+        token1 = token1,
+        reserve0 = 0,
+        reserve1 = 0,
+        block_timestamp_last = 0,
+        price0_cumulative_last = 0,
+        price1_cumulative_last = 0,
+        total_supply = 0,
+        balance_of = {},
+        allowances = {},
+        locked_liquidity = 0,
+        protocol_fees_0 = 0,
+        protocol_fees_1 = 0,
+        fund_fees_0 = 0,
+        fund_fees_1 = 0,
+        creator_fees_0 = 0,
+        creator_fees_1 = 0,
+        observations = {},
+        observation_index = 0,
+        observation_count = 0,
+        status = 0,
+        open_time = open_time,
+        locked = false
+        }
+
+    // ── Read-only entrypoints ──
+
+    // Returns composite LP token metadata derived from the underlying pair tokens
+    entrypoint meta_info() : IAEX9.meta_info =
+        let m0 = state.token0.meta_info()
+        let m1 = state.token1.meta_info()
+        { name = String.concat(String.concat(m0.symbol, "/"), m1.symbol),
+          symbol = String.concat(String.concat(m0.symbol, "-"), m1.symbol),
+          decimals = 18 }
+
+    // Total LP tokens in circulation
+    entrypoint lp_total_supply() : int = state.total_supply
+    // LP token balance for a given address (None if never held)
+    entrypoint lp_balance(owner: address) : option(int) = Map.lookup(owner, state.balance_of)
+    // First token in canonical pair ordering
+    entrypoint token_0() : IAEX9 = state.token0
+    // Second token in canonical pair ordering
+    entrypoint token_1() : IAEX9 = state.token1
+    // Current reserves and timestamp of last oracle update
+    entrypoint get_reserves() = (state.reserve0, state.reserve1, state.block_timestamp_last)
+    // Cumulative Q32 price of token0 used for TWAP calculation
+    entrypoint price0_cumulative_last() : int = state.price0_cumulative_last
+    // Cumulative Q32 price of token1 used for TWAP calculation
+    entrypoint price1_cumulative_last() : int = state.price1_cumulative_last
+    // Current pool status bitmask
+    entrypoint get_status() : int = state.status
+    // Address of the pool creator (receives creator fees)
+    entrypoint get_creator() : address = state.creator
+    // Accrued protocol fees (token0, token1) awaiting collection
+    entrypoint get_protocol_fees() = (state.protocol_fees_0, state.protocol_fees_1)
+    // Accrued fund fees (token0, token1) awaiting collection
+    entrypoint get_fund_fees() = (state.fund_fees_0, state.fund_fees_1)
+    // Accrued creator fees (token0, token1) awaiting collection
+    entrypoint get_creator_fees() = (state.creator_fees_0, state.creator_fees_1)
+    // Returns a specific TWAP oracle observation by ring-buffer index
+    entrypoint get_observation(index: int) : PriceOracle.observation =
+        require(Map.member(index, state.observations), "OBSERVATION_NOT_FOUND")
+        state.observations[index]
+
+    // ── AEX-9 LP token ──
+
+    // Transfers LP tokens from the caller to the recipient
+    stateful entrypoint transfer(to: address, amount: int) : unit =
+        require(amount > 0, "ZERO_AMOUNT")
+        let from_bal = Map.lookup_default(Call.caller, state.balance_of, 0)
+        require(from_bal >= amount, "INSUFFICIENT_LP_BALANCE")
+        put(state { balance_of[Call.caller] = from_bal - amount,
+                    balance_of[to = 0] @ b = b + amount })
+        Chain.event(Transfer(Call.caller, to, amount))
+
+    // Grants a spender permission to transfer up to `amount` of caller's LP tokens
+    stateful entrypoint create_allowance(spender: address, amount: int) : unit =
+        let accounts = { from_account = Call.caller, for_account = spender }
+        put(state { allowances[accounts] = amount })
+        Chain.event(Approval(Call.caller, spender, amount))
+
+    // Adjusts an existing LP token allowance by a signed delta
+    stateful entrypoint change_allowance(spender: address, amount_change: int) : unit =
+        let accounts = { from_account = Call.caller, for_account = spender }
+        let current = Map.lookup_default(accounts, state.allowances, 0)
+        let new_amount = current + amount_change
+        require(new_amount >= 0, "NEGATIVE_ALLOWANCE")
+        put(state { allowances[accounts] = new_amount })
+
+    // Returns the remaining LP token allowance for a from/for account pair
+    entrypoint allowance(accounts: allowance_accounts) : option(int) =
+        Map.lookup(accounts, state.allowances)
+
+    // Transfers LP tokens from `from` to `to`, consuming the caller's allowance from `from`
+    stateful entrypoint transfer_allowance(from: address, to: address, amount: int) : unit =
+        require(amount > 0, "ZERO_AMOUNT")
+        let accounts = { from_account = from, for_account = Call.caller }
+        let allowed = Map.lookup_default(accounts, state.allowances, 0)
+        require(allowed >= amount, "INSUFFICIENT_ALLOWANCE")
+        let from_bal = Map.lookup_default(from, state.balance_of, 0)
+        require(from_bal >= amount, "INSUFFICIENT_LP_BALANCE")
+        put(state { balance_of[from] = from_bal - amount,
+                    balance_of[to = 0] @ b = b + amount,
+                    allowances[accounts] = allowed - amount })
+        Chain.event(Transfer(from, to, amount))
+
+    // ── Core pool operations ──
+
+    // Adds liquidity proportional to reserves; first deposit bootstraps with geometric mean
+    stateful entrypoint deposit(amount0: int, amount1: int) : int =
+        require_unlocked()
+        set_lock(true)
+        require(is_enabled(0), "DEPOSIT_DISABLED")
+        require(amount0 > 0 && amount1 > 0, "ZERO_DEPOSIT")
+
+        state.token0.transfer_allowance(Call.caller, Contract.address, amount0)
+        state.token1.transfer_allowance(Call.caller, Contract.address, amount1)
+
+        let lp_amount =
+            if(state.total_supply == 0)
+                let lp = Math.sqrt(amount0 * amount1) - minimum_liquidity
+                require(lp > 0, "INSUFFICIENT_INITIAL_LIQUIDITY")
+                mint_lp(Contract.address, minimum_liquidity)
+                lp
+            else
+                let (er0, er1) = effective_reserves()
+                Math.min(amount0 * state.total_supply / er0,
+                         amount1 * state.total_supply / er1)
+
+        require(lp_amount > 0, "INSUFFICIENT_LIQUIDITY_MINTED")
+        mint_lp(Call.caller, lp_amount)
+        update_reserves_and_oracle()
+        Chain.event(Deposit(Call.caller, amount0, amount1))
+        set_lock(false)
+        lp_amount
+
+    // Burns LP tokens and returns proportional share of both reserves
+    stateful entrypoint withdraw(lp_amount: int, minimum_token_0: int, minimum_token_1: int) : (int * int) =
+        require_unlocked()
+        set_lock(true)
+        require(is_enabled(1), "WITHDRAW_DISABLED")
+        require(lp_amount > 0, "ZERO_WITHDRAW")
+
+        let caller_lp = Map.lookup_default(Call.caller, state.balance_of, 0)
+        require(caller_lp >= lp_amount, "INSUFFICIENT_LP_BALANCE")
+
+        let (er0, er1) = effective_reserves()
+        let amount0 = lp_amount * er0 / state.total_supply
+        let amount1 = lp_amount * er1 / state.total_supply
+        require(amount0 >= minimum_token_0, "SLIPPAGE_TOKEN_0")
+        require(amount1 >= minimum_token_1, "SLIPPAGE_TOKEN_1")
+
+        burn_lp(Call.caller, lp_amount)
+        state.token0.transfer(Call.caller, amount0)
+        state.token1.transfer(Call.caller, amount1)
+        update_reserves_and_oracle()
+
+        let (nr0, nr1) = effective_reserves()
+        require(nr0 > 0 && nr1 > 0, "RESERVES_DEPLETED")
+
+        Chain.event(Withdraw(Call.caller, amount0, amount1))
+        set_lock(false)
+        (amount0, amount1)
+
+    // Exact-input CPMM swap: trades known input amount, applies trade/creator/protocol/fund fees
+    stateful entrypoint swap_base_input(input_token: IAEX9, amount_in: int, minimum_amount_out: int) : int =
+        require_unlocked()
+        set_lock(true)
+        require(is_enabled(2), "SWAP_DISABLED")
+        require(Chain.timestamp >= state.open_time, "NOT_OPEN")
+        require(amount_in > 0, "ZERO_INPUT")
+
+        let zero_for_one = input_token.address == state.token0.address
+        require(zero_for_one || input_token.address == state.token1.address, "INVALID_TOKEN")
+
+        let (er0, er1) = effective_reserves()
+        let (reserve_in, reserve_out) = if(zero_for_one) (er0, er1) else (er1, er0)
+
+        let fee_cfg = state.config.get_config(state.config_index)
+        let trade_fee = FeeMath.trading_fee(amount_in, fee_cfg.trade_fee_rate)
+        let creator_fee_amt = FeeMath.creator_fee(amount_in, fee_cfg.creator_fee_rate)
+        let total_fee = trade_fee + creator_fee_amt
+        let amount_in_after_fee = amount_in - total_fee
+
+        let amount_out = SwapMath.amount_out(amount_in_after_fee, reserve_in, reserve_out)
+        require(amount_out >= minimum_amount_out, "SLIPPAGE_EXCEEDED")
+
+        let protocol_fee_amt = FeeMath.protocol_fee(trade_fee, fee_cfg.protocol_fee_rate)
+        let fund_fee_amt = FeeMath.fund_fee(trade_fee, fee_cfg.fund_fee_rate)
+
+        input_token.transfer_allowance(Call.caller, Contract.address, amount_in)
+        let out_token = if(zero_for_one) state.token1 else state.token0
+        out_token.transfer(Call.caller, amount_out)
+
+        accrue_fees(zero_for_one, protocol_fee_amt, fund_fee_amt, creator_fee_amt)
+        update_reserves_and_oracle()
+
+        Chain.event(SwapInput(Call.caller, amount_in, amount_out))
+        let (nr0, nr1) = effective_reserves()
+        Chain.event(Sync(nr0, nr1))
+        set_lock(false)
+        amount_out
+
+    // Exact-output CPMM swap: computes required input to produce desired output
+    stateful entrypoint swap_base_output(input_token: IAEX9, max_amount_in: int, amount_out: int) : int =
+        require_unlocked()
+        set_lock(true)
+        require(is_enabled(2), "SWAP_DISABLED")
+        require(Chain.timestamp >= state.open_time, "NOT_OPEN")
+        require(amount_out > 0, "ZERO_OUTPUT")
+
+        let zero_for_one = input_token.address == state.token0.address
+        require(zero_for_one || input_token.address == state.token1.address, "INVALID_TOKEN")
+
+        let (er0, er1) = effective_reserves()
+        let (reserve_in, reserve_out) = if(zero_for_one) (er0, er1) else (er1, er0)
+        require(amount_out < reserve_out, "INSUFFICIENT_LIQUIDITY")
+
+        let fee_cfg = state.config.get_config(state.config_index)
+        let amount_in_no_fee = SwapMath.amount_in(amount_out, reserve_in, reserve_out)
+        let total_rate = fee_cfg.trade_fee_rate + fee_cfg.creator_fee_rate
+        let amount_in_total = FeeMath.pre_fee_amount(amount_in_no_fee, total_rate)
+        require(amount_in_total =< max_amount_in, "SLIPPAGE_EXCEEDED")
+
+        let trade_fee = FeeMath.trading_fee(amount_in_total, fee_cfg.trade_fee_rate)
+        let creator_fee_amt = FeeMath.creator_fee(amount_in_total, fee_cfg.creator_fee_rate)
+        let protocol_fee_amt = FeeMath.protocol_fee(trade_fee, fee_cfg.protocol_fee_rate)
+        let fund_fee_amt = FeeMath.fund_fee(trade_fee, fee_cfg.fund_fee_rate)
+
+        input_token.transfer_allowance(Call.caller, Contract.address, amount_in_total)
+        let out_token = if(zero_for_one) state.token1 else state.token0
+        out_token.transfer(Call.caller, amount_out)
+
+        accrue_fees(zero_for_one, protocol_fee_amt, fund_fee_amt, creator_fee_amt)
+        update_reserves_and_oracle()
+
+        Chain.event(SwapOutput(Call.caller, amount_in_total, amount_out))
+        let (nr0, nr1) = effective_reserves()
+        Chain.event(Sync(nr0, nr1))
+        set_lock(false)
+        amount_in_total
+
+    // ── Fee collection ──
+
+    // Protocol owner withdraws accrued protocol fees up to requested maximums
+    stateful entrypoint collect_protocol_fee(max0: int, max1: int) : (int * int) =
+        require(Call.caller == state.config.protocol_owner(), "UNAUTHORIZED")
+        let a0 = Math.min(max0, state.protocol_fees_0)
+        let a1 = Math.min(max1, state.protocol_fees_1)
+        if(a0 > 0) state.token0.transfer(Call.caller, a0)
+        if(a1 > 0) state.token1.transfer(Call.caller, a1)
+        put(state { protocol_fees_0 @ f = f - a0, protocol_fees_1 @ f = f - a1 })
+        Chain.event(CollectProtocolFee(Call.caller, a0, a1))
+        (a0, a1)
+
+    // Fund owner withdraws accrued fund fees up to requested maximums
+    stateful entrypoint collect_fund_fee(max0: int, max1: int) : (int * int) =
+        require(Call.caller == state.config.fund_owner(), "UNAUTHORIZED")
+        let a0 = Math.min(max0, state.fund_fees_0)
+        let a1 = Math.min(max1, state.fund_fees_1)
+        if(a0 > 0) state.token0.transfer(Call.caller, a0)
+        if(a1 > 0) state.token1.transfer(Call.caller, a1)
+        put(state { fund_fees_0 @ f = f - a0, fund_fees_1 @ f = f - a1 })
+        Chain.event(CollectFundFee(Call.caller, a0, a1))
+        (a0, a1)
+
+    // Pool creator withdraws all accrued creator fees
+    stateful entrypoint collect_creator_fee() : (int * int) =
+        require(Call.caller == state.creator, "UNAUTHORIZED")
+        let a0 = state.creator_fees_0
+        let a1 = state.creator_fees_1
+        if(a0 > 0) state.token0.transfer(Call.caller, a0)
+        if(a1 > 0) state.token1.transfer(Call.caller, a1)
+        put(state { creator_fees_0 = 0, creator_fees_1 = 0 })
+        Chain.event(CollectCreatorFee(Call.caller, a0, a1))
+        (a0, a1)
+
+    // ── Admin ──
+
+    // Admin bitflag control: bit 0 = deposit, bit 1 = withdraw, bit 2 = swap
+    stateful entrypoint update_pool_status(new_status: int) : unit =
+        require(Call.caller == state.config.admin(), "UNAUTHORIZED")
+        let old = state.status
+        put(state { status = new_status })
+        Chain.event(UpdatePoolStatus(old, new_status))
+
+    // ── Sync/Skim ──
+
+    // Re-reads token balances and updates reserves and TWAP oracle
+    stateful entrypoint sync() : unit =
+        update_reserves_and_oracle()
+
+    // Sends any excess token balance beyond reserves + accrued fees to recipient
+    stateful entrypoint skim(to: address) : unit =
+        let (er0, er1) = effective_reserves()
+        let bal0 = get_balance_0()
+        let bal1 = get_balance_1()
+        let excess0 = bal0 - er0 - state.protocol_fees_0 - state.fund_fees_0 - state.creator_fees_0
+        let excess1 = bal1 - er1 - state.protocol_fees_1 - state.fund_fees_1 - state.creator_fees_1
+        if(excess0 > 0) state.token0.transfer(to, excess0)
+        if(excess1 > 0) state.token1.transfer(to, excess1)
+
+    // ── Internal functions ──
+
+    // Actual token balances minus all accrued protocol/fund/creator fees
+    function effective_reserves() : (int * int) =
+        let b0 = get_balance_0()
+        let b1 = get_balance_1()
+        (b0 - state.protocol_fees_0 - state.fund_fees_0 - state.creator_fees_0,
+         b1 - state.protocol_fees_1 - state.fund_fees_1 - state.creator_fees_1)
+
+    function get_balance_0() : int =
+        Option.default(0, state.token0.balance(Contract.address))
+
+    function get_balance_1() : int =
+        Option.default(0, state.token1.balance(Contract.address))
+
+    function is_enabled(bit: int) : bool =
+        (state.status band (1 << bit)) == 0
+
+    function require_unlocked() =
+        require(!state.locked, "LOCKED")
+
+    stateful function set_lock(v: bool) =
+        put(state { locked = v })
+
+    // Mints LP tokens to a recipient and increases total supply
+    stateful function mint_lp(to: address, amount: int) =
+        put(state { total_supply @ s = s + amount,
+                    balance_of[to = 0] @ b = b + amount })
+        Chain.event(Transfer(Contract.address, to, amount))
+
+    // Burns LP tokens from a holder and reduces total supply
+    stateful function burn_lp(from: address, amount: int) =
+        let bal = Map.lookup_default(from, state.balance_of, 0)
+        require(bal >= amount, "INSUFFICIENT_LP_BALANCE")
+        put(state { total_supply @ s = s - amount,
+                    balance_of[from] = bal - amount })
+        Chain.event(Transfer(from, Contract.address, amount))
+
+    // Distributes a swap's fees into protocol, fund, and creator accumulators
+    stateful function accrue_fees(zero_for_one: bool, protocol_f: int, fund_f: int, creator_f: int) =
+        if(zero_for_one)
+            put(state { protocol_fees_0 @ f = f + protocol_f,
+                        fund_fees_0 @ f = f + fund_f,
+                        creator_fees_0 @ f = f + creator_f })
+        else
+            put(state { protocol_fees_1 @ f = f + protocol_f,
+                        fund_fees_1 @ f = f + fund_f,
+                        creator_fees_1 @ f = f + creator_f })
+
+    // Snapshots balances, updates TWAP price accumulators, and writes oracle
+    stateful function update_reserves_and_oracle() =
+        let b0 = get_balance_0()
+        let b1 = get_balance_1()
+        let er0 = b0 - state.protocol_fees_0 - state.fund_fees_0 - state.creator_fees_0
+        let er1 = b1 - state.protocol_fees_1 - state.fund_fees_1 - state.creator_fees_1
+
+        let ts = Chain.timestamp
+        let time_elapsed = ts - state.block_timestamp_last
+
+        let (new_p0_cum, new_p1_cum) =
+            if(time_elapsed > 0 && state.reserve0 > 0 && state.reserve1 > 0)
+                let p0 = state.reserve1 * q32 / state.reserve0
+                let p1 = state.reserve0 * q32 / state.reserve1
+                (state.price0_cumulative_last + p0 * time_elapsed,
+                 state.price1_cumulative_last + p1 * time_elapsed)
+            else
+                (state.price0_cumulative_last, state.price1_cumulative_last)
+
+        put(state { reserve0 = er0,
+                    reserve1 = er1,
+                    block_timestamp_last = ts,
+                    price0_cumulative_last = new_p0_cum,
+                    price1_cumulative_last = new_p1_cum })
+
+        update_oracle_observation(ts, er0, er1)
+        Chain.event(Sync(er0, er1))
+
+    // Appends or updates a ring-buffer TWAP observation slot
+    stateful function update_oracle_observation(ts: int, r0: int, r1: int) =
+        if(r0 > 0 && r1 > 0)
+            let p0 = r1 * q32 / r0
+            let p1 = r0 * q32 / r1
+            let idx = state.observation_index
+            let last_obs = Map.lookup_default(idx, state.observations, PriceOracle.default_observation())
+            let (updated, advance) = PriceOracle.update(last_obs, ts, p0, p1)
+            if(advance)
+                let new_idx = (idx + 1) mod observation_num
+                put(state { observations[new_idx] = updated,
+                            observation_index = new_idx,
+                            observation_count = Math.min(state.observation_count + 1, observation_num) })
+            else
+                put(state { observations[idx] = updated })

@@ -1,0 +1,52 @@
+@compiler >= 8
+
+include "./Math.aes"
+include "List.aes"
+
+namespace SwapMath =
+    let fee_rate_denominator = 1_000_000
+
+    // Constant-product out: floor(amount_in * reserve_out / (reserve_in + amount_in)); fee already in amount_in if used.
+    function amount_out(amount_in: int, reserve_in: int, reserve_out: int) : int =
+        require(amount_in > 0, "SWAP_INSUFFICIENT_INPUT")
+        require(reserve_in > 0 && reserve_out > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
+        let numerator = amount_in * reserve_out
+        let denominator = reserve_in + amount_in
+        numerator / denominator
+
+    // Exact-out ceil: +1 after division so integer rounding never leaves the pool short of amount_out.
+    function amount_in(amount_out: int, reserve_in: int, reserve_out: int) : int =
+        require(amount_out > 0, "SWAP_INSUFFICIENT_OUTPUT")
+        require(reserve_in > 0 && reserve_out > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
+        require(amount_out < reserve_out, "SWAP_EXCEEDS_RESERVES")
+        let numerator = reserve_in * amount_out
+        let denominator = reserve_out - amount_out
+        numerator / denominator + 1
+
+    // Proportional leg along reserves (no +input in denominator) — spot-style quote, not swap output.
+    function quote(amount_a: int, reserve_a: int, reserve_b: int) : int =
+        require(amount_a > 0, "SWAP_INSUFFICIENT_AMOUNT")
+        require(reserve_a > 0 && reserve_b > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
+        amount_a * reserve_b / reserve_a
+
+    // Multi-hop forward: each hop’s output becomes the next hop’s input; list ends with final out (reversed internally).
+    function get_amounts_out(amount_in: int, reserves: list(int * int)) : list(int) =
+        get_amounts_out_loop(amount_in, reserves, [amount_in])
+
+    private function get_amounts_out_loop(current: int, reserves: list(int * int), acc: list(int)) : list(int) =
+        switch(reserves)
+            [] => List.reverse(acc)
+            (r_in, r_out) :: rest =>
+                let out = amount_out(current, r_in, r_out)
+                get_amounts_out_loop(out, rest, out :: acc)
+
+    // Multi-hop backward: path reserves reversed so each step solves amount_in for the next hop’s desired out.
+    function get_amounts_in(amount_out_final: int, reserves: list(int * int)) : list(int) =
+        get_amounts_in_loop(amount_out_final, List.reverse(reserves), [amount_out_final])
+
+    private function get_amounts_in_loop(current: int, reserves: list(int * int), acc: list(int)) : list(int) =
+        switch(reserves)
+            [] => acc
+            (r_in, r_out) :: rest =>
+                let needed = amount_in(current, r_in, r_out)
+                get_amounts_in_loop(needed, rest, needed :: acc)

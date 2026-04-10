@@ -1,0 +1,21 @@
+// Wrapped AE (WAE) token interface
+// Wraps native AE into an AEX-9 compatible token for use in DEX pools
+@compiler >= 8
+
+include "./IAEX9.aes"
+
+contract interface IWAE =
+    // Returns token name, symbol, and decimals
+    entrypoint meta_info : () => IAEX9.meta_info
+    // Total WAE tokens in circulation (should equal contract's AE balance)
+    entrypoint total_supply : () => int
+    // WAE balance for a given address
+    entrypoint balance : (address) => option(int)
+    // Wraps sent AE into WAE, credited to the caller
+    payable stateful entrypoint deposit : () => unit
+    // Wraps sent AE into WAE, credited to the specified recipient
+    payable stateful entrypoint deposit_to : (address) => unit
+    // Burns WAE and sends the equivalent AE back to the caller
+    stateful entrypoint withdraw : (int) => unit
+    // Transfers WAE tokens from caller to recipient
+    stateful entrypoint transfer : (address, int) => unit

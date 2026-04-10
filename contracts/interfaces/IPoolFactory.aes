@@ -1,0 +1,18 @@
+// CLMM pool factory interface
+// Deploys new Pool contracts via Chain.clone and maintains a paginated registry
+@compiler >= 8
+
+include "./IAEX9.aes"
+include "./IPool.aes"
+
+contract interface IPoolFactory =
+    // Looks up an existing pool by token pair and fee tier index (order-independent)
+    entrypoint get_pool : (IAEX9, IAEX9, int) => option(IPool)
+    // Total number of pools created through this factory
+    entrypoint pool_count : () => int
+    // Returns the pool at a specific zero-based index
+    entrypoint get_pool_at : (int) => IPool
+    // Paginated retrieval: returns up to `limit` pools starting from `offset`
+    entrypoint get_pools : (int, int) => list(IPool)
+    // Creates a new CLMM pool (tokenA, tokenB, config_index, initial_sqrt_price, open_time)
+    stateful entrypoint create_pool : (IAEX9, IAEX9, int, int, int) => IPool

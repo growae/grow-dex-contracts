@@ -1,0 +1,89 @@
+@compiler >= 8
+
+include "String.aes"
+
+payable main contract WAE =
+    record allowance_accounts = { from_account: address, for_account: address }
+    record meta_info = { name: string, symbol: string, decimals: int }
+
+    record state = {
+        balances   : map(address, int),
+        allowances : map(allowance_accounts, int)
+        }
+
+    datatype event
+        = Transfer(address, address, int)
+        | Approval(address, address, int)
+        | Deposit(address, int)
+        | Withdrawal(address, int)
+
+    entrypoint init() = { balances = {}, allowances = {} }
+
+    entrypoint meta_info() : meta_info =
+        { name = "Wrapped AE", symbol = "WAE", decimals = 18 }
+
+    entrypoint total_supply() : int = Contract.balance
+
+    entrypoint balance(account: address) : option(int) =
+        Map.lookup(account, state.balances)
+
+    entrypoint allowance(accounts: allowance_accounts) : option(int) =
+        Map.lookup(accounts, state.allowances)
+
+    // Wraps native AE sent with the call into WAE tokens for the caller
+    payable stateful entrypoint deposit() : unit =
+        require(Call.value > 0, "WAE_ZERO_DEPOSIT")
+        put(state { balances[Call.caller = 0] @ b = b + Call.value })
+        Chain.event(Deposit(Call.caller, Call.value))
+
+    // Wraps native AE into WAE credited to an arbitrary recipient
+    payable stateful entrypoint deposit_to(to: address) : unit =
+        require(Call.value > 0, "WAE_ZERO_DEPOSIT")
+        put(state { balances[to = 0] @ b = b + Call.value })
+        Chain.event(Deposit(to, Call.value))
+
+    // Burns WAE and sends equivalent native AE back to the caller
+    stateful entrypoint withdraw(amount: int) : unit =
+        require(amount > 0, "WAE_ZERO_WITHDRAW")
+        let bal = Map.lookup_default(Call.caller, state.balances, 0)
+        require(bal >= amount, "WAE_INSUFFICIENT_BALANCE")
+        put(state { balances[Call.caller] = bal - amount })
+        Chain.spend(Call.caller, amount)
+        Chain.event(Withdrawal(Call.caller, amount))
+
+    // Moves WAE from caller to recipient
+    stateful entrypoint transfer(to: address, amount: int) : unit =
+        require(amount > 0, "NEGATIVE_AMOUNT")
+        let from_bal = Map.lookup_default(Call.caller, state.balances, 0)
+        require(from_bal >= amount, "INSUFFICIENT_BALANCE")
+        put(state { balances[Call.caller] = from_bal - amount,
+                    balances[to = 0] @ b = b + amount })
+        Chain.event(Transfer(Call.caller, to, amount))
+
+    // Sets exact WAE spending allowance for a spender
+    stateful entrypoint create_allowance(spender: address, amount: int) : unit =
+        require(amount >= 0, "NEGATIVE_ALLOWANCE")
+        let accounts = { from_account = Call.caller, for_account = spender }
+        put(state { allowances[accounts] = amount })
+        Chain.event(Approval(Call.caller, spender, amount))
+
+    stateful entrypoint change_allowance(spender: address, amount_change: int) : unit =
+        let accounts = { from_account = Call.caller, for_account = spender }
+        let current = Map.lookup_default(accounts, state.allowances, 0)
+        let new_amount = current + amount_change
+        require(new_amount >= 0, "NEGATIVE_ALLOWANCE")
+        put(state { allowances[accounts] = new_amount })
+        Chain.event(Approval(Call.caller, spender, new_amount))
+
+    // Spends WAE from another account using caller's allowance
+    stateful entrypoint transfer_allowance(from: address, to: address, amount: int) : unit =
+        require(amount > 0, "NEGATIVE_AMOUNT")
+        let accounts = { from_account = from, for_account = Call.caller }
+        let allowed = Map.lookup_default(accounts, state.allowances, 0)
+        require(allowed >= amount, "INSUFFICIENT_ALLOWANCE")
+        let from_bal = Map.lookup_default(from, state.balances, 0)
+        require(from_bal >= amount, "INSUFFICIENT_BALANCE")
+        put(state { balances[from] = from_bal - amount,
+                    balances[to = 0] @ b = b + amount,
+                    allowances[accounts] = allowed - amount })
+        Chain.event(Transfer(from, to, amount))

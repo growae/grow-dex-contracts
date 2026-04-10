@@ -1,0 +1,8 @@
+@compiler >= 8
+
+include "../../contracts/lib/SwapMath.aes"
+
+main contract SwapMathTest =
+    entrypoint amount_out(amount_in: int, reserve_in: int, reserve_out: int) : int = SwapMath.amount_out(amount_in, reserve_in, reserve_out)
+    entrypoint amount_in(amount_out_val: int, reserve_in: int, reserve_out: int) : int = SwapMath.amount_in(amount_out_val, reserve_in, reserve_out)
+    entrypoint quote(amount_a: int, reserve_a: int, reserve_b: int) : int = SwapMath.quote(amount_a, reserve_a, reserve_b)

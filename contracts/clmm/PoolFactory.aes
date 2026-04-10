@@ -1,0 +1,103 @@
+// CLMM Pool Factory
+// Deploys new concentrated-liquidity Pool contracts via Chain.clone and
+// maintains a paginated, gas-safe registry of all created pools.
+// Each pool is uniquely identified by (token0, token1, config_index).
+@compiler >= 8
+
+include "../interfaces/IAEX9.aes"
+include "../interfaces/IDexConfig.aes"
+include "../interfaces/IPool.aes"
+
+main contract PoolFactory =
+    record state = {
+        admin       : address,                             // Deployer / admin address
+        config      : IDexConfig,                          // Central fee configuration contract
+        pool_model  : IPool,                               // Template contract cloned for each new pool
+        pools       : map(address * address * int, IPool), // (token0, token1, config_index) → Pool
+        all_pools   : map(int, IPool),                     // Sequential index → Pool (for pagination)
+        pool_count  : int                                  // Total pools created
+        }
+
+    datatype event
+        = PoolCreated(IAEX9, IAEX9, int)  // Emitted on pool creation (token0, token1, tick_spacing)
+
+    // Sets up CLMM factory with DexConfig and a Pool template for cloning
+    entrypoint init(config: IDexConfig, pool_model: IPool) = {
+        admin = Call.caller,
+        config = config,
+        pool_model = pool_model,
+        pools = {},
+        all_pools = {},
+        pool_count = 0
+        }
+
+    // Looks up a CLMM pool by token pair and fee tier index
+    entrypoint get_pool(token_a: IAEX9, token_b: IAEX9, config_index: int) : option(IPool) =
+        let (t0, t1) = sort_tokens(token_a, token_b)
+        Map.lookup((t0.address, t1.address, config_index), state.pools)
+
+    // Total number of pools deployed through this factory
+    entrypoint pool_count() : int = state.pool_count
+
+    // O(1) lookup by index
+    entrypoint get_pool_at(index: int) : IPool =
+        require(index >= 0 && index < state.pool_count, "INDEX_OUT_OF_BOUNDS")
+        state.all_pools[index]
+
+    // Bounded paginated retrieval — returns up to `limit` pools starting at `offset`
+    entrypoint get_pools(offset: int, limit: int) : list(IPool) =
+        require(offset >= 0, "NEGATIVE_OFFSET")
+        require(limit > 0, "ZERO_LIMIT")
+        let end = min(offset + limit, state.pool_count)
+        collect_range(end - 1, offset, [])
+
+    // Deploys a new CLMM pool via Chain.clone with initial sqrt price and tick spacing
+    payable stateful entrypoint create_pool(
+            token_a: IAEX9,
+            token_b: IAEX9,
+            config_index: int,
+            initial_sqrt_price: int,
+            open_time: int
+        ) : IPool =
+        require(token_a.address != token_b.address, "IDENTICAL_TOKENS")
+        let (t0, t1) = sort_tokens(token_a, token_b)
+        require(!Map.member((t0.address, t1.address, config_index), state.pools), "POOL_EXISTS")
+
+        let fee_cfg = state.config.get_config(config_index)
+        require(!fee_cfg.disabled, "CONFIG_DISABLED")
+        require(fee_cfg.tick_spacing > 0, "INVALID_TICK_SPACING")
+
+        if(fee_cfg.create_pool_fee > 0)
+            require(Call.value >= fee_cfg.create_pool_fee, "INSUFFICIENT_POOL_FEE")
+            Chain.spend(state.admin, fee_cfg.create_pool_fee)
+            let refund = Call.value - fee_cfg.create_pool_fee
+            if(refund > 0) Chain.spend(Call.caller, refund)
+
+        let pool : IPool = Chain.clone(
+            ref = state.pool_model,
+            state.config,
+            config_index,
+            t0, t1,
+            fee_cfg.tick_spacing,
+            initial_sqrt_price,
+            Call.caller,
+            open_time)
+
+        let idx = state.pool_count
+        put(state { pools[(t0.address, t1.address, config_index)] = pool,
+                    all_pools[idx] = pool,
+                    pool_count = idx + 1 })
+        Chain.event(PoolCreated(t0, t1, fee_cfg.tick_spacing))
+        pool
+
+    // Canonical ordering: lower address first
+    function sort_tokens(a: IAEX9, b: IAEX9) : (IAEX9 * IAEX9) =
+        if(a.address < b.address) (a, b) else (b, a)
+
+    function min(a: int, b: int) : int =
+        if(a < b) a else b
+
+    // Iterates backwards from end-1 to offset, prepending to build forward-ordered result
+    private function collect_range(j: int, stop: int, acc: list(IPool)) : list(IPool) =
+        if(j < stop) acc
+        else collect_range(j - 1, stop, state.all_pools[j] :: acc)

@@ -1,0 +1,93 @@
+@compiler >= 8
+
+include "List.aes"
+include "Option.aes"
+include "./interfaces/IAEX9.aes"
+include "./interfaces/IPair.aes"
+include "./interfaces/IPairFactory.aes"
+include "./interfaces/IWAE.aes"
+
+payable main contract Router =
+    record state = {
+        factory : IPairFactory,
+        wae     : IWAE
+        }
+
+    entrypoint init(factory: IPairFactory, wae: IWAE) = {
+        factory = factory,
+        wae = wae
+        }
+
+    // --- CPMM Swaps ---
+
+    // Multi-hop exact-input swap: walks the token path, swapping through each pair
+    stateful entrypoint swap_base_input(
+            input_token: IAEX9,
+            amount_in: int,
+            minimum_amount_out: int,
+            path: list(IAEX9),
+            deadline: int
+        ) : int =
+        require(Chain.timestamp =< deadline, "EXPIRED")
+        require(amount_in > 0, "ZERO_INPUT")
+        require(List.length(path) >= 2, "INVALID_PATH")
+        input_token.transfer_allowance(Call.caller, Contract.address, amount_in)
+        let final_amount = swap_hops_input(amount_in, path)
+        require(final_amount >= minimum_amount_out, "SLIPPAGE_EXCEEDED")
+        let output_token = last_token(path)
+        output_token.transfer(Call.caller, final_amount)
+        final_amount
+
+    // Single-pair exact-output swap: computes required input and refunds excess
+    stateful entrypoint swap_base_output(
+            input_token: IAEX9,
+            max_amount_in: int,
+            amount_out: int,
+            path: list(IAEX9),
+            deadline: int
+        ) : int =
+        require(Chain.timestamp =< deadline, "EXPIRED")
+        require(amount_out > 0, "ZERO_OUTPUT")
+        require(List.length(path) >= 2, "INVALID_PATH")
+        input_token.transfer_allowance(Call.caller, Contract.address, max_amount_in)
+        let token_in : IAEX9 = list_head(path)
+        let token_out : IAEX9 = last_token(path)
+        let pair_opt = state.factory.get_pair(token_in, token_out)
+        require(Option.is_some(pair_opt), "PAIR_NOT_FOUND")
+        let pair = Option.force(pair_opt)
+        token_in.create_allowance(pair.address, max_amount_in)
+        let amount_spent = pair.swap_base_output(token_in, max_amount_in, amount_out)
+        token_out.transfer(Call.caller, amount_out)
+        let refund = max_amount_in - amount_spent
+        if(refund > 0)
+            token_in.transfer(Call.caller, refund)
+        amount_spent
+
+    // --- Internal helpers ---
+
+    // Recursive helper: chains swap_base_input calls along the token path
+    stateful function swap_hops_input(amount: int, path: list(IAEX9)) : int =
+        switch(path)
+            [_single] => amount
+            token_in :: token_out :: rest =>
+                let pair_opt = state.factory.get_pair(token_in, token_out)
+                require(Option.is_some(pair_opt), "PAIR_NOT_FOUND")
+                let pair = Option.force(pair_opt)
+                token_in.create_allowance(pair.address, amount)
+                let out = pair.swap_base_input(token_in, amount, 0)
+                switch(rest)
+                    [] => out
+                    _ => swap_hops_input(out, token_out :: rest)
+            _ => abort("INVALID_PATH")
+
+    // Recursively finds the final token in a swap path list
+    function last_token(path: list(IAEX9)) : IAEX9 =
+        switch(path)
+            [x] => x
+            _ :: rest => last_token(rest)
+            [] => abort("EMPTY_PATH")
+
+    function list_head(path: list(IAEX9)) : IAEX9 =
+        switch(path)
+            x :: _ => x
+            [] => abort("EMPTY_PATH")

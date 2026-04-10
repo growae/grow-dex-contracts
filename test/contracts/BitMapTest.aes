@@ -1,0 +1,22 @@
+@compiler >= 8
+
+include "../../contracts/lib/BitMap.aes"
+
+main contract BitMapTest =
+    entrypoint is_initialized(bitmap: int, bit_pos: int) : bool =
+        BitMap.is_initialized(bitmap, bit_pos)
+
+    entrypoint flip_bit(bitmap: int, bit_pos: int) : int =
+        BitMap.flip_bit(bitmap, bit_pos)
+
+    entrypoint next_initialized_bit_lte(bitmap: int, bit_pos: int) : option(int) =
+        BitMap.next_initialized_bit_lte(bitmap, bit_pos)
+
+    entrypoint next_initialized_bit_gte(bitmap: int, bit_pos: int) : option(int) =
+        BitMap.next_initialized_bit_gte(bitmap, bit_pos)
+
+    entrypoint msb(x: int) : int =
+        BitMap.msb(x)
+
+    entrypoint lsb(x: int) : int =
+        BitMap.lsb(x)

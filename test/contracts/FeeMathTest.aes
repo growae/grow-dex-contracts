@@ -1,0 +1,10 @@
+@compiler >= 8
+
+include "../../contracts/lib/FeeMath.aes"
+
+main contract FeeMathTest =
+    entrypoint trading_fee(amount: int, rate: int) : int = FeeMath.trading_fee(amount, rate)
+    entrypoint protocol_fee(trade_fee: int, rate: int) : int = FeeMath.protocol_fee(trade_fee, rate)
+    entrypoint fund_fee(trade_fee: int, rate: int) : int = FeeMath.fund_fee(trade_fee, rate)
+    entrypoint creator_fee(amount: int, rate: int) : int = FeeMath.creator_fee(amount, rate)
+    entrypoint pre_fee_amount(post_fee_amount: int, total_fee_rate: int) : int = FeeMath.pre_fee_amount(post_fee_amount, total_fee_rate)
