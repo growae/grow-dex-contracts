@@ -1,0 +1,24 @@
+@compiler >= 8
+
+include "./Math.aes"
+
+namespace FeeMath =
+    let FEE_RATE_DENOMINATOR : int = 1_000_000
+
+    function trading_fee(amount: int, rate: int) : int =
+        if(rate == 0) 0
+        else Math.ceil_div(amount * rate, FEE_RATE_DENOMINATOR)
+
+    function protocol_fee(trade_fee: int, rate: int) : int =
+        trade_fee * rate / FEE_RATE_DENOMINATOR
+
+    function fund_fee(trade_fee: int, rate: int) : int =
+        trade_fee * rate / FEE_RATE_DENOMINATOR
+
+    function creator_fee(amount: int, rate: int) : int =
+        if(rate == 0) 0
+        else Math.ceil_div(amount * rate, FEE_RATE_DENOMINATOR)
+
+    function pre_fee_amount(post_fee_amount: int, total_fee_rate: int) : int =
+        if(total_fee_rate == 0) post_fee_amount
+        else Math.ceil_div(post_fee_amount * FEE_RATE_DENOMINATOR, FEE_RATE_DENOMINATOR - total_fee_rate)
