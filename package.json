@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "description": "This is the default package.json generated for your project",
   "scripts": {
-    "test": "mocha './test/**/*.js' --timeout 0 --exit"
+    "test": "mocha './test/**/*.js' --timeout 0 --exit",
+    "deploy:testnet": "node scripts/deploy.js --network testnet",
+    "deploy:mainnet": "node scripts/deploy.js --network mainnet",
+    "generate-wallet": "node scripts/generate-wallet.js"
   },
   "type": "module",
   "dependencies": {
-    "@aeternity/aepp-sdk": "^14.0.0"
+    "@aeternity/aepp-sdk": "^14.0.0",
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "@aeternity/aeproject": "^5.0.0",

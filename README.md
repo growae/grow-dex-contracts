@@ -1,4 +1,4 @@
-# Grow DEX
+# Grow DEX Contracts
 
 > **WARNING: USE AT YOUR OWN RISK**
 >
@@ -95,22 +95,49 @@ GitHub Actions runs the full test suite on every pull request and push to `devel
 
 ## Deployment
 
-Production WAE addresses (reused from existing deployments):
+### Quick start
+
+```bash
+# Generate a new wallet (if needed)
+npm run generate-wallet
+
+# Copy .env.example and set your secret key
+cp .env.example .env
+
+# Deploy to testnet
+npm run deploy:testnet
+
+# Deploy to mainnet
+npm run deploy:mainnet
+```
+
+The deploy script handles the full deployment sequence automatically:
+
+1. **DexConfig** — deploys and creates four fee tier configs (Stable, Standard, Volatile, Exotic)
+2. **Pair** — deploys a CPMM template instance
+3. **PairFactory** — deploys with DexConfig address and Pair template
+4. **Pool** — deploys a CLMM template instance
+5. **PoolFactory** — deploys with DexConfig address and Pool template
+6. **Router** — deploys with PairFactory and WAE addresses
+7. **Farm** — deploys the LP staking contract
+
+### Fee tiers
+
+| Tier | Trade Fee | Protocol | Fund | Creator | Tick Spacing |
+|------|-----------|----------|------|---------|--------------|
+| Stable | 0.05% | 12% | 4% | — | 1 |
+| Standard | 0.25% | 12% | 4% | 0.05% | 10 |
+| Volatile | 1.00% | 12% | 4% | 0.05% | 60 |
+| Exotic | 2.00% | 12% | 4% | 0.05% | 120 |
+
+### WAE addresses
+
+Production WAE contracts (reused from existing deployments):
 
 | Network | WAE Address |
 |---------|-------------|
 | Mainnet | `ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa` |
 | Testnet | `ct_JDp175ruWd7mQggeHewSLS1PFXt9AzThCDaFedxon8mF8xTRF` |
-
-### Deployment order
-
-1. `DexConfig` — deploy and create fee tier configs
-2. `Pair` — deploy a template instance
-3. `PairFactory` — deploy with DexConfig address and Pair template
-4. `Pool` — deploy a template instance
-5. `PoolFactory` — deploy with DexConfig address and Pool template
-6. `Router` — deploy with PairFactory and WAE addresses
-7. `Farm` — deploy, then create farms and fund with reward tokens
 
 ## Stack
 
