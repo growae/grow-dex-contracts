@@ -34,7 +34,7 @@ main contract Pair =
         fund_fees_1       : int,
         creator_fees_0    : int,
         creator_fees_1    : int,
-        observations      : map(int, Oracle.observation),
+        observations      : map(int, PriceOracle.observation),
         observation_index : int,
         observation_count : int,
         status            : int,
@@ -42,18 +42,18 @@ main contract Pair =
         locked            : bool
         }
 
-    let MINIMUM_LIQUIDITY : int = 100
-    let Q32 : int = 4294967296
-    let OBSERVATION_NUM : int = 100
-    let OBSERVATION_UPDATE_DURATION : int = 15
+    let minimum_liquidity = 100
+    let q32 = 4294967296
+    let observation_num = 100
+    let observation_update_duration = 15
 
     datatype event
         = Transfer(address, address, int)
         | Approval(address, address, int)
-        | Deposit(address, int, int, int)
-        | Withdraw(address, int, int, int)
-        | SwapInput(address, address, int, int)
-        | SwapOutput(address, address, int, int)
+        | Deposit(address, int, int)
+        | Withdraw(address, int, int)
+        | SwapInput(address, int, int)
+        | SwapOutput(address, int, int)
         | Sync(int, int)
         | CollectProtocolFee(address, int, int)
         | CollectFundFee(address, int, int)
@@ -118,7 +118,7 @@ main contract Pair =
     entrypoint get_protocol_fees() = (state.protocol_fees_0, state.protocol_fees_1)
     entrypoint get_fund_fees() = (state.fund_fees_0, state.fund_fees_1)
     entrypoint get_creator_fees() = (state.creator_fees_0, state.creator_fees_1)
-    entrypoint get_observation(index: int) : Oracle.observation =
+    entrypoint get_observation(index: int) : PriceOracle.observation =
         require(Map.member(index, state.observations), "OBSERVATION_NOT_FOUND")
         state.observations[index]
 
@@ -161,6 +161,7 @@ main contract Pair =
 
     // ── Core pool operations ──
 
+    // Adds liquidity proportional to reserves; first deposit bootstraps with geometric mean
     stateful entrypoint deposit(amount0: int, amount1: int) : int =
         require_unlocked()
         set_lock(true)
@@ -172,9 +173,9 @@ main contract Pair =
 
         let lp_amount =
             if(state.total_supply == 0)
-                let lp = Math.sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY
+                let lp = Math.sqrt(amount0 * amount1) - minimum_liquidity
                 require(lp > 0, "INSUFFICIENT_INITIAL_LIQUIDITY")
-                mint_lp(Contract.address, MINIMUM_LIQUIDITY)
+                mint_lp(Contract.address, minimum_liquidity)
                 lp
             else
                 let (er0, er1) = effective_reserves()
@@ -184,10 +185,11 @@ main contract Pair =
         require(lp_amount > 0, "INSUFFICIENT_LIQUIDITY_MINTED")
         mint_lp(Call.caller, lp_amount)
         update_reserves_and_oracle()
-        Chain.event(Deposit(Call.caller, amount0, amount1, lp_amount))
+        Chain.event(Deposit(Call.caller, amount0, amount1))
         set_lock(false)
         lp_amount
 
+    // Burns LP tokens and returns proportional share of both reserves
     stateful entrypoint withdraw(lp_amount: int, minimum_token_0: int, minimum_token_1: int) : (int * int) =
         require_unlocked()
         set_lock(true)
@@ -211,10 +213,11 @@ main contract Pair =
         let (nr0, nr1) = effective_reserves()
         require(nr0 > 0 && nr1 > 0, "RESERVES_DEPLETED")
 
-        Chain.event(Withdraw(Call.caller, amount0, amount1, lp_amount))
+        Chain.event(Withdraw(Call.caller, amount0, amount1))
         set_lock(false)
         (amount0, amount1)
 
+    // Exact-input CPMM swap: trades known input amount, applies trade/creator/protocol/fund fees
     stateful entrypoint swap_base_input(input_token: IAEX9, amount_in: int, minimum_amount_out: int) : int =
         require_unlocked()
         set_lock(true)
@@ -247,12 +250,13 @@ main contract Pair =
         accrue_fees(zero_for_one, protocol_fee_amt, fund_fee_amt, creator_fee_amt)
         update_reserves_and_oracle()
 
-        Chain.event(SwapInput(Call.caller, input_token.address, amount_in, amount_out))
+        Chain.event(SwapInput(Call.caller, amount_in, amount_out))
         let (nr0, nr1) = effective_reserves()
         Chain.event(Sync(nr0, nr1))
         set_lock(false)
         amount_out
 
+    // Exact-output CPMM swap: computes required input to produce desired output
     stateful entrypoint swap_base_output(input_token: IAEX9, max_amount_in: int, amount_out: int) : int =
         require_unlocked()
         set_lock(true)
@@ -285,7 +289,7 @@ main contract Pair =
         accrue_fees(zero_for_one, protocol_fee_amt, fund_fee_amt, creator_fee_amt)
         update_reserves_and_oracle()
 
-        Chain.event(SwapOutput(Call.caller, input_token.address, amount_in_total, amount_out))
+        Chain.event(SwapOutput(Call.caller, amount_in_total, amount_out))
         let (nr0, nr1) = effective_reserves()
         Chain.event(Sync(nr0, nr1))
         set_lock(false)
@@ -293,6 +297,7 @@ main contract Pair =
 
     // ── Fee collection ──
 
+    // Protocol owner withdraws accrued protocol fees up to requested maximums
     stateful entrypoint collect_protocol_fee(max0: int, max1: int) : (int * int) =
         require(Call.caller == state.config.protocol_owner(), "UNAUTHORIZED")
         let a0 = Math.min(max0, state.protocol_fees_0)
@@ -303,6 +308,7 @@ main contract Pair =
         Chain.event(CollectProtocolFee(Call.caller, a0, a1))
         (a0, a1)
 
+    // Fund owner withdraws accrued fund fees up to requested maximums
     stateful entrypoint collect_fund_fee(max0: int, max1: int) : (int * int) =
         require(Call.caller == state.config.fund_owner(), "UNAUTHORIZED")
         let a0 = Math.min(max0, state.fund_fees_0)
@@ -313,6 +319,7 @@ main contract Pair =
         Chain.event(CollectFundFee(Call.caller, a0, a1))
         (a0, a1)
 
+    // Pool creator withdraws all accrued creator fees
     stateful entrypoint collect_creator_fee() : (int * int) =
         require(Call.caller == state.creator, "UNAUTHORIZED")
         let a0 = state.creator_fees_0
@@ -325,6 +332,7 @@ main contract Pair =
 
     // ── Admin ──
 
+    // Admin bitflag control: bit 0 = deposit, bit 1 = withdraw, bit 2 = swap
     stateful entrypoint update_pool_status(new_status: int) : unit =
         require(Call.caller == state.config.admin(), "UNAUTHORIZED")
         let old = state.status
@@ -333,9 +341,11 @@ main contract Pair =
 
     // ── Sync/Skim ──
 
+    // Re-reads token balances and updates reserves and TWAP oracle
     stateful entrypoint sync() : unit =
         update_reserves_and_oracle()
 
+    // Sends any excess token balance beyond reserves + accrued fees to recipient
     stateful entrypoint skim(to: address) : unit =
         let (er0, er1) = effective_reserves()
         let bal0 = get_balance_0()
@@ -347,6 +357,7 @@ main contract Pair =
 
     // ── Internal functions ──
 
+    // Actual token balances minus all accrued protocol/fund/creator fees
     function effective_reserves() : (int * int) =
         let b0 = get_balance_0()
         let b1 = get_balance_1()
@@ -360,7 +371,7 @@ main contract Pair =
         Option.default(0, state.token1.balance(Contract.address))
 
     function is_enabled(bit: int) : bool =
-        (state.status band (1 bsl bit)) == 0
+        (state.status band (1 << bit)) == 0
 
     function require_unlocked() =
         require(!state.locked, "LOCKED")
@@ -368,11 +379,13 @@ main contract Pair =
     stateful function set_lock(v: bool) =
         put(state { locked = v })
 
+    // Mints LP tokens to a recipient and increases total supply
     stateful function mint_lp(to: address, amount: int) =
         put(state { total_supply @ s = s + amount,
                     balance_of[to = 0] @ b = b + amount })
         Chain.event(Transfer(Contract.address, to, amount))
 
+    // Burns LP tokens from a holder and reduces total supply
     stateful function burn_lp(from: address, amount: int) =
         let bal = Map.lookup_default(from, state.balance_of, 0)
         require(bal >= amount, "INSUFFICIENT_LP_BALANCE")
@@ -380,6 +393,7 @@ main contract Pair =
                     balance_of[from] = bal - amount })
         Chain.event(Transfer(from, Contract.address, amount))
 
+    // Distributes a swap's fees into protocol, fund, and creator accumulators
     stateful function accrue_fees(zero_for_one: bool, protocol_f: int, fund_f: int, creator_f: int) =
         if(zero_for_one)
             put(state { protocol_fees_0 @ f = f + protocol_f,
@@ -390,6 +404,7 @@ main contract Pair =
                         fund_fees_1 @ f = f + fund_f,
                         creator_fees_1 @ f = f + creator_f })
 
+    // Snapshots balances, updates TWAP price accumulators, and writes oracle
     stateful function update_reserves_and_oracle() =
         let b0 = get_balance_0()
         let b1 = get_balance_1()
@@ -401,8 +416,8 @@ main contract Pair =
 
         let (new_p0_cum, new_p1_cum) =
             if(time_elapsed > 0 && state.reserve0 > 0 && state.reserve1 > 0)
-                let p0 = state.reserve1 * Q32 / state.reserve0
-                let p1 = state.reserve0 * Q32 / state.reserve1
+                let p0 = state.reserve1 * q32 / state.reserve0
+                let p1 = state.reserve0 * q32 / state.reserve1
                 (state.price0_cumulative_last + p0 * time_elapsed,
                  state.price1_cumulative_last + p1 * time_elapsed)
             else
@@ -417,17 +432,18 @@ main contract Pair =
         update_oracle_observation(ts, er0, er1)
         Chain.event(Sync(er0, er1))
 
+    // Appends or updates a ring-buffer TWAP observation slot
     stateful function update_oracle_observation(ts: int, r0: int, r1: int) =
         if(r0 > 0 && r1 > 0)
-            let p0 = r1 * Q32 / r0
-            let p1 = r0 * Q32 / r1
+            let p0 = r1 * q32 / r0
+            let p1 = r0 * q32 / r1
             let idx = state.observation_index
-            let last_obs = Map.lookup_default(idx, state.observations, Oracle.default_observation())
-            let (updated, advance) = Oracle.update(last_obs, ts, p0, p1)
+            let last_obs = Map.lookup_default(idx, state.observations, PriceOracle.default_observation())
+            let (updated, advance) = PriceOracle.update(last_obs, ts, p0, p1)
             if(advance)
-                let new_idx = (idx + 1) mod OBSERVATION_NUM
+                let new_idx = (idx + 1) mod observation_num
                 put(state { observations[new_idx] = updated,
                             observation_index = new_idx,
-                            observation_count = Math.min(state.observation_count + 1, OBSERVATION_NUM) })
+                            observation_count = Math.min(state.observation_count + 1, observation_num) })
             else
                 put(state { observations[idx] = updated })

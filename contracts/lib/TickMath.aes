@@ -9,6 +9,7 @@ namespace TickMath =
     let min_sqrt_price = 4295048016
     let max_sqrt_price = 79226673521066979257578248091
 
+    // √(1.0001^tick) in Q64.64 via bitwise decomposition; positive ticks invert so ratio stays in range.
     function get_sqrt_price_at_tick(tick: int) : int =
         require(tick >= min_tick && tick =< max_tick, "TICK_OOB")
         let abs_tick = Math.abs(tick)
@@ -18,6 +19,7 @@ namespace TickMath =
         else
             ratio
 
+    // Multiplies precomputed 1.0001^(2^k) factors for each set bit of |tick| (Uniswap-style tick math).
     private function apply_multipliers(abs_tick: int, ratio: int) : int =
         let r = if((abs_tick band 0x1) != 0) ratio * 18445821805675392311 / q64 else ratio
         let r = if((abs_tick band 0x2) != 0) r * 18444899583751176498 / q64 else r
@@ -40,10 +42,12 @@ namespace TickMath =
         let r = if((abs_tick band 0x40000) != 0) r * 37481735321082 / q64 else r
         r
 
+    // Inverse mapping: binary search on [min_tick, max_tick] for the tick whose sqrt price brackets sqrt_price.
     function get_tick_at_sqrt_price(sqrt_price: int) : int =
         require(sqrt_price >= min_sqrt_price && sqrt_price =< max_sqrt_price, "PRICE_OOB")
         binary_search_tick(sqrt_price, min_tick, max_tick)
 
+    // Finds the tick whose sqrt is ≤ target when target lies between adjacent ticks (base case compares low/high).
     private function binary_search_tick(target: int, low: int, high: int) : int =
         if(high - low =< 1)
             let price_low = get_sqrt_price_at_tick(low)

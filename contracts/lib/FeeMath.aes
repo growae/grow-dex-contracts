@@ -5,26 +5,32 @@ include "./Math.aes"
 namespace FeeMath =
     let fee_rate_denominator = 1_000_000
 
+    // Ceil on bps so the pool never under-collects vs the configured fee rate.
     function trading_fee(amount: int, rate: int) : int =
         if(rate == 0) 0
         else Math.ceil_div(amount * rate, fee_rate_denominator)
 
+    // Floor share of the trading fee leg; integer truncation leaves marginal dust in the fee pool.
     function protocol_fee(trade_fee: int, rate: int) : int =
         trade_fee * rate / fee_rate_denominator
 
+    // Same floor split as protocol_fee but routed to the fund rate.
     function fund_fee(trade_fee: int, rate: int) : int =
         trade_fee * rate / fee_rate_denominator
 
+    // Ceil on notional so creator accrual matches trading_fee rounding policy on the amount base.
     function creator_fee(amount: int, rate: int) : int =
         if(rate == 0) 0
         else Math.ceil_div(amount * rate, fee_rate_denominator)
 
+    // Floors protocol and fund legs; remainder to creator so the three parts sum to total_creator_fee.
     function split_creator_fee(total_creator_fee: int, protocol_rate: int, fund_rate: int) : (int * int * int) =
         let to_protocol = total_creator_fee * protocol_rate / fee_rate_denominator
         let to_fund = total_creator_fee * fund_rate / fee_rate_denominator
         let to_creator = total_creator_fee - to_protocol - to_fund
         (to_protocol, to_fund, to_creator)
 
+    // Smallest gross such that after deducting total_fee_rate the user receives post_fee_amount (ceil).
     function pre_fee_amount(post_fee_amount: int, total_fee_rate: int) : int =
         if(total_fee_rate == 0) post_fee_amount
         else Math.ceil_div(post_fee_amount * fee_rate_denominator, fee_rate_denominator - total_fee_rate)

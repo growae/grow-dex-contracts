@@ -20,7 +20,7 @@ main contract DexConfig =
         next_index     : int
         }
 
-    let FEE_RATE_DENOMINATOR : int = 1_000_000
+    let fee_rate_denominator = 1_000_000
 
     datatype event
         = ConfigCreated(int, int, int)
@@ -46,6 +46,7 @@ main contract DexConfig =
     entrypoint all_configs() : map(int, fee_config) = state.configs
     entrypoint next_index() : int = state.next_index
 
+    // Registers a new fee tier with trade/protocol/fund/creator rates and tick spacing
     stateful entrypoint create_amm_config(
             trade_fee_rate: int,
             protocol_fee_rate: int,
@@ -55,10 +56,10 @@ main contract DexConfig =
             tick_spacing: int
         ) : int =
         require(Call.caller == state.admin, "UNAUTHORIZED")
-        require(trade_fee_rate + creator_fee_rate < FEE_RATE_DENOMINATOR, "FEE_TOO_HIGH")
-        require(protocol_fee_rate =< FEE_RATE_DENOMINATOR, "PROTOCOL_FEE_TOO_HIGH")
-        require(fund_fee_rate =< FEE_RATE_DENOMINATOR, "FUND_FEE_TOO_HIGH")
-        require(protocol_fee_rate + fund_fee_rate =< FEE_RATE_DENOMINATOR, "COMBINED_FEE_TOO_HIGH")
+        require(trade_fee_rate + creator_fee_rate < fee_rate_denominator, "FEE_TOO_HIGH")
+        require(protocol_fee_rate =< fee_rate_denominator, "PROTOCOL_FEE_TOO_HIGH")
+        require(fund_fee_rate =< fee_rate_denominator, "FUND_FEE_TOO_HIGH")
+        require(protocol_fee_rate + fund_fee_rate =< fee_rate_denominator, "COMBINED_FEE_TOO_HIGH")
         require(tick_spacing >= 0, "INVALID_TICK_SPACING")
         let idx = state.next_index
         let cfg = {
@@ -75,6 +76,7 @@ main contract DexConfig =
         Chain.event(ConfigCreated(idx, trade_fee_rate, tick_spacing))
         idx
 
+    // Modifies a single parameter of an existing fee config by param index
     stateful entrypoint update_amm_config(index: int, param: int, value: int) : unit =
         require(Call.caller == state.admin, "UNAUTHORIZED")
         require(Map.member(index, state.configs), "CONFIG_NOT_FOUND")
@@ -88,23 +90,26 @@ main contract DexConfig =
             5 => cfg { tick_spacing = value }
             6 => cfg { disabled = value != 0 }
             _ => abort("INVALID_PARAM")
-        require(updated.trade_fee_rate + updated.creator_fee_rate < FEE_RATE_DENOMINATOR, "FEE_TOO_HIGH")
-        require(updated.protocol_fee_rate + updated.fund_fee_rate =< FEE_RATE_DENOMINATOR, "COMBINED_FEE_TOO_HIGH")
+        require(updated.trade_fee_rate + updated.creator_fee_rate < fee_rate_denominator, "FEE_TOO_HIGH")
+        require(updated.protocol_fee_rate + updated.fund_fee_rate =< fee_rate_denominator, "COMBINED_FEE_TOO_HIGH")
         put(state { configs[index] = updated })
         Chain.event(ConfigUpdated(index, param, value))
 
+    // Transfers protocol fee collection rights to a new address
     stateful entrypoint set_protocol_owner(new_owner: address) : unit =
         require(Call.caller == state.admin, "UNAUTHORIZED")
         let old = state.protocol_owner
         put(state { protocol_owner = new_owner })
         Chain.event(ProtocolOwnerChanged(old, new_owner))
 
+    // Transfers fund fee collection rights to a new address
     stateful entrypoint set_fund_owner(new_owner: address) : unit =
         require(Call.caller == state.admin, "UNAUTHORIZED")
         let old = state.fund_owner
         put(state { fund_owner = new_owner })
         Chain.event(FundOwnerChanged(old, new_owner))
 
+    // Transfers admin role; new admin can manage configs and roles
     stateful entrypoint set_admin(new_admin: address) : unit =
         require(Call.caller == state.admin, "UNAUTHORIZED")
         let old = state.admin

@@ -1,6 +1,6 @@
 @compiler >= 8
 
-namespace Oracle =
+namespace PriceOracle =
     let observation_num = 100
     let observation_update_duration = 15
 
@@ -10,9 +10,11 @@ namespace Oracle =
         cumulative_price_1 : int
         }
 
+    // Sentinel: zero timestamp and cumulatives until the first on-chain sample.
     function default_observation() : observation =
         { block_timestamp = 0, cumulative_price_0 = 0, cumulative_price_1 = 0 }
 
+    // Accumulates price × Δt for TWAP; skips write if same block; advance when Δt ≥ observation_update_duration.
     function update(
             last_obs: observation,
             current_timestamp: int,
@@ -33,6 +35,7 @@ namespace Oracle =
             let advance = time_delta >= observation_update_duration
             (updated, advance)
 
+    // TWAP in Q32.32: (cumulative_new − cumulative_old) / (timestamp_new − timestamp_old) per side.
     function get_twap_price_x32(obs_old: observation, obs_new: observation) : (int * int) =
         let time_delta = obs_new.block_timestamp - obs_old.block_timestamp
         require(time_delta > 0, "ORACLE_NO_TIME_DELTA")
