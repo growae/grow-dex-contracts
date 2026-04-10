@@ -1,0 +1,112 @@
+@compiler >= 8
+
+main contract DexConfig =
+    record fee_config = {
+        index            : int,
+        trade_fee_rate   : int,
+        protocol_fee_rate: int,
+        fund_fee_rate    : int,
+        creator_fee_rate : int,
+        create_pool_fee  : int,
+        tick_spacing     : int,
+        disabled         : bool
+    }
+
+    record state = {
+        admin          : address,
+        protocol_owner : address,
+        fund_owner     : address,
+        configs        : map(int, fee_config),
+        next_index     : int
+    }
+
+    let FEE_RATE_DENOMINATOR : int = 1_000_000
+
+    datatype event
+        = ConfigCreated(int, int, int)
+        | ConfigUpdated(int, int, int)
+        | ProtocolOwnerChanged(address, address)
+        | FundOwnerChanged(address, address)
+        | AdminChanged(address, address)
+
+    entrypoint init() = {
+        admin = Call.caller,
+        protocol_owner = Call.caller,
+        fund_owner = Call.caller,
+        configs = {},
+        next_index = 0
+    }
+
+    entrypoint admin() : address = state.admin
+    entrypoint protocol_owner() : address = state.protocol_owner
+    entrypoint fund_owner() : address = state.fund_owner
+    entrypoint get_config(index: int) : fee_config =
+        require(Map.member(index, state.configs), "CONFIG_NOT_FOUND")
+        state.configs[index]
+    entrypoint all_configs() : map(int, fee_config) = state.configs
+    entrypoint next_index() : int = state.next_index
+
+    stateful entrypoint create_amm_config(
+            trade_fee_rate: int,
+            protocol_fee_rate: int,
+            fund_fee_rate: int,
+            creator_fee_rate: int,
+            create_pool_fee: int,
+            tick_spacing: int
+        ) : int =
+        require(Call.caller == state.admin, "UNAUTHORIZED")
+        require(trade_fee_rate + creator_fee_rate < FEE_RATE_DENOMINATOR, "FEE_TOO_HIGH")
+        require(protocol_fee_rate =< FEE_RATE_DENOMINATOR, "PROTOCOL_FEE_TOO_HIGH")
+        require(fund_fee_rate =< FEE_RATE_DENOMINATOR, "FUND_FEE_TOO_HIGH")
+        require(protocol_fee_rate + fund_fee_rate =< FEE_RATE_DENOMINATOR, "COMBINED_FEE_TOO_HIGH")
+        require(tick_spacing >= 0, "INVALID_TICK_SPACING")
+        let idx = state.next_index
+        let cfg = {
+            index = idx,
+            trade_fee_rate = trade_fee_rate,
+            protocol_fee_rate = protocol_fee_rate,
+            fund_fee_rate = fund_fee_rate,
+            creator_fee_rate = creator_fee_rate,
+            create_pool_fee = create_pool_fee,
+            tick_spacing = tick_spacing,
+            disabled = false
+        }
+        put(state { configs[idx] = cfg, next_index = idx + 1 })
+        Chain.event(ConfigCreated(idx, trade_fee_rate, tick_spacing))
+        idx
+
+    stateful entrypoint update_amm_config(index: int, param: int, value: int) : unit =
+        require(Call.caller == state.admin, "UNAUTHORIZED")
+        require(Map.member(index, state.configs), "CONFIG_NOT_FOUND")
+        let cfg = state.configs[index]
+        let updated = switch(param)
+            0 => cfg { trade_fee_rate = value }
+            1 => cfg { protocol_fee_rate = value }
+            2 => cfg { fund_fee_rate = value }
+            3 => cfg { creator_fee_rate = value }
+            4 => cfg { create_pool_fee = value }
+            5 => cfg { tick_spacing = value }
+            6 => cfg { disabled = value != 0 }
+            _ => abort("INVALID_PARAM")
+        require(updated.trade_fee_rate + updated.creator_fee_rate < FEE_RATE_DENOMINATOR, "FEE_TOO_HIGH")
+        require(updated.protocol_fee_rate + updated.fund_fee_rate =< FEE_RATE_DENOMINATOR, "COMBINED_FEE_TOO_HIGH")
+        put(state { configs[index] = updated })
+        Chain.event(ConfigUpdated(index, param, value))
+
+    stateful entrypoint set_protocol_owner(new_owner: address) : unit =
+        require(Call.caller == state.admin, "UNAUTHORIZED")
+        let old = state.protocol_owner
+        put(state { protocol_owner = new_owner })
+        Chain.event(ProtocolOwnerChanged(old, new_owner))
+
+    stateful entrypoint set_fund_owner(new_owner: address) : unit =
+        require(Call.caller == state.admin, "UNAUTHORIZED")
+        let old = state.fund_owner
+        put(state { fund_owner = new_owner })
+        Chain.event(FundOwnerChanged(old, new_owner))
+
+    stateful entrypoint set_admin(new_admin: address) : unit =
+        require(Call.caller == state.admin, "UNAUTHORIZED")
+        let old = state.admin
+        put(state { admin = new_admin })
+        Chain.event(AdminChanged(old, new_admin))
