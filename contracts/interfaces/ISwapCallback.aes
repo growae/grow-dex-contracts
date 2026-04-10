@@ -1,0 +1,4 @@
+@compiler >= 8
+
+contract interface ISwapCallback =
+    stateful entrypoint swap_callback : (address, int, int) => unit

@@ -1,0 +1,22 @@
+@compiler >= 8
+
+include "./IAEX9.aes"
+include "./IDexConfig.aes"
+
+contract interface IPair =
+    record reserves = { reserve0: int, reserve1: int, block_timestamp_last: int }
+    entrypoint token_0 : () => IAEX9
+    entrypoint token_1 : () => IAEX9
+    entrypoint get_reserves : () => reserves
+    entrypoint lp_total_supply : () => int
+    entrypoint lp_balance : (address) => option(int)
+    stateful entrypoint deposit : (int, int, int) => int
+    stateful entrypoint withdraw : (int, int, int) => (int * int)
+    stateful entrypoint swap_base_input : (IAEX9, int, int) => int
+    stateful entrypoint swap_base_output : (IAEX9, int, int) => int
+    stateful entrypoint collect_protocol_fee : (int, int) => (int * int)
+    stateful entrypoint collect_fund_fee : (int, int) => (int * int)
+    stateful entrypoint collect_creator_fee : () => (int * int)
+    stateful entrypoint update_pool_status : (int) => unit
+    stateful entrypoint skim : (address) => unit
+    stateful entrypoint sync : () => unit

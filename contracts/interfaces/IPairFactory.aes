@@ -1,0 +1,10 @@
+@compiler >= 8
+
+include "./IAEX9.aes"
+include "./IPair.aes"
+
+contract interface IPairFactory =
+    entrypoint get_pair : (IAEX9, IAEX9) => option(IPair)
+    entrypoint all_pairs : () => list(IPair)
+    entrypoint all_pairs_length : () => int
+    stateful entrypoint initialize : (IAEX9, IAEX9, int, int, int) => IPair
