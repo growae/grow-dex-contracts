@@ -1,6 +1,7 @@
 @compiler >= 8
 
 include "./Math.aes"
+include "List.aes"
 
 namespace SwapMath =
     let FEE_RATE_DENOMINATOR : int = 1_000_000
@@ -24,3 +25,23 @@ namespace SwapMath =
         require(amount_a > 0, "SWAP_INSUFFICIENT_AMOUNT")
         require(reserve_a > 0 && reserve_b > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
         amount_a * reserve_b / reserve_a
+
+    function get_amounts_out(amount_in: int, reserves: list(int * int)) : list(int) =
+        get_amounts_out_loop(amount_in, reserves, [amount_in])
+
+    private function get_amounts_out_loop(current: int, reserves: list(int * int), acc: list(int)) : list(int) =
+        switch(reserves)
+            [] => List.reverse(acc)
+            (r_in, r_out) :: rest =>
+                let out = amount_out(current, r_in, r_out)
+                get_amounts_out_loop(out, rest, out :: acc)
+
+    function get_amounts_in(amount_out_final: int, reserves: list(int * int)) : list(int) =
+        get_amounts_in_loop(amount_out_final, List.reverse(reserves), [amount_out_final])
+
+    private function get_amounts_in_loop(current: int, reserves: list(int * int), acc: list(int)) : list(int) =
+        switch(reserves)
+            [] => acc
+            (r_in, r_out) :: rest =>
+                let needed = amount_in(current, r_in, r_out)
+                get_amounts_in_loop(needed, rest, needed :: acc)
