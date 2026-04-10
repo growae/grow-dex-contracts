@@ -1,0 +1,10 @@
+@compiler >= 8
+
+include "./IAEX9.aes"
+include "./IPairFactory.aes"
+include "./IWAE.aes"
+include "./IDexConfig.aes"
+
+contract interface IRouter =
+    stateful entrypoint swap_base_input : (IAEX9, int, int, list(IAEX9), int) => int
+    stateful entrypoint swap_base_output : (IAEX9, int, int, list(IAEX9), int) => int
