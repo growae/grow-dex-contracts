@@ -12,12 +12,6 @@ include "../lib/Oracle.aes"
 main contract Pair =
     record allowance_accounts = { from_account: address, for_account: address }
 
-    record observation = {
-        block_timestamp    : int,
-        cumulative_price_0 : int,
-        cumulative_price_1 : int
-    }
-
     record state = {
         factory           : address,
         config            : IDexConfig,
@@ -40,7 +34,7 @@ main contract Pair =
         fund_fees_1       : int,
         creator_fees_0    : int,
         creator_fees_1    : int,
-        observations      : map(int, observation),
+        observations      : map(int, Oracle.observation),
         observation_index : int,
         observation_count : int,
         status            : int,
@@ -124,7 +118,7 @@ main contract Pair =
     entrypoint get_protocol_fees() = (state.protocol_fees_0, state.protocol_fees_1)
     entrypoint get_fund_fees() = (state.fund_fees_0, state.fund_fees_1)
     entrypoint get_creator_fees() = (state.creator_fees_0, state.creator_fees_1)
-    entrypoint get_observation(index: int) : observation =
+    entrypoint get_observation(index: int) : Oracle.observation =
         require(Map.member(index, state.observations), "OBSERVATION_NOT_FOUND")
         state.observations[index]
 
@@ -428,17 +422,12 @@ main contract Pair =
             let p0 = r1 * Q32 / r0
             let p1 = r0 * Q32 / r1
             let idx = state.observation_index
-            let last_obs = Map.lookup_default(idx, state.observations,
-                { block_timestamp = 0, cumulative_price_0 = 0, cumulative_price_1 = 0 })
-            let time_delta = ts - last_obs.block_timestamp
-            if(time_delta > 0)
-                let new_cum_0 = last_obs.cumulative_price_0 + p0 * time_delta
-                let new_cum_1 = last_obs.cumulative_price_1 + p1 * time_delta
-                let updated = { block_timestamp = ts, cumulative_price_0 = new_cum_0, cumulative_price_1 = new_cum_1 }
-                if(time_delta >= OBSERVATION_UPDATE_DURATION)
-                    let new_idx = (idx + 1) mod OBSERVATION_NUM
-                    put(state { observations[new_idx] = updated,
-                                observation_index = new_idx,
-                                observation_count = Math.min(state.observation_count + 1, OBSERVATION_NUM) })
-                else
-                    put(state { observations[idx] = updated })
+            let last_obs = Map.lookup_default(idx, state.observations, Oracle.default_observation())
+            let (updated, advance) = Oracle.update(last_obs, ts, p0, p1)
+            if(advance)
+                let new_idx = (idx + 1) mod OBSERVATION_NUM
+                put(state { observations[new_idx] = updated,
+                            observation_index = new_idx,
+                            observation_count = Math.min(state.observation_count + 1, OBSERVATION_NUM) })
+            else
+                put(state { observations[idx] = updated })
