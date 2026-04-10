@@ -1,24 +1,13 @@
 @compiler >= 8
 
 include "./IAEX9.aes"
+include "./IDexConfig.aes"
 
 contract interface IPool =
+    entrypoint init : (IDexConfig, int, IAEX9, IAEX9, int, int, address, int) => unit
     entrypoint token_0 : () => IAEX9
     entrypoint token_1 : () => IAEX9
     entrypoint sqrt_price_x64 : () => int
     entrypoint tick_current : () => int
     entrypoint liquidity : () => int
-    entrypoint fee_growth_global_0 : () => int
-    entrypoint fee_growth_global_1 : () => int
-    stateful entrypoint swap : (bool, int, int, int) => (int * int)
-    stateful entrypoint open_position : (int, int, int, int, int) => int
-    stateful entrypoint close_position : (int) => unit
-    stateful entrypoint increase_liquidity : (int, int, int, int) => (int * int)
-    stateful entrypoint decrease_liquidity : (int, int, int, int) => (int * int)
-    stateful entrypoint collect_protocol_fee : (int, int) => (int * int)
-    stateful entrypoint collect_fund_fee : (int, int) => (int * int)
-    stateful entrypoint initialize_reward : (int, IAEX9, int, int, int) => unit
-    stateful entrypoint set_reward_params : (int, int, int, int) => unit
-    stateful entrypoint collect_remaining_rewards : (int) => unit
-    stateful entrypoint update_reward_infos : () => unit
-    stateful entrypoint update_pool_status : (int) => unit
+    entrypoint get_status : () => int

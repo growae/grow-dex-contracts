@@ -1,5 +1,5 @@
 import { utils } from "@aeternity/aeproject";
-import { Contract, getFileSystem } from "@aeternity/aepp-sdk";
+import { Contract, getFileSystem, decode, encode, Encoding } from "@aeternity/aepp-sdk";
 
 export const Q32 = 2n ** 32n;
 export const Q64 = 2n ** 64n;
@@ -53,6 +53,10 @@ export function amountIn(amountOutVal, reserveIn, reserveOut) {
   const numerator = reserveIn * amountOutVal;
   const denominator = reserveOut - amountOutVal;
   return numerator / denominator + 1n;
+}
+
+export function contractToAccount(ctAddress) {
+  return encode(decode(ctAddress), Encoding.AccountAddress);
 }
 
 export async function expectRevert(promise, errorMsg) {

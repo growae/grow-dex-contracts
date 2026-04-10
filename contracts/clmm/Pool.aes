@@ -12,8 +12,8 @@ include "../lib/LiquidityMath.aes"
 include "../lib/BitMap.aes"
 
 main contract Pool =
-    let Q64 : int = 18446744073709551616
-    let MAX_TICKS_PER_SWAP : int = 20
+    let q64 = 18446744073709551616
+    let max_ticks_per_swap = 20
 
     record tick_state = {
         liquidity_net        : int,
@@ -59,11 +59,11 @@ main contract Pool =
         }
 
     datatype event
-        = PositionOpened(address, int, int, int, int, int, int)
+        = PositionOpened(address, int, int)
         | PositionClosed(address, int)
-        | IncreaseLiquidity(int, int, int, int)
-        | DecreaseLiquidity(int, int, int, int)
-        | Swap(address, int, int, int, int, int)
+        | IncreaseLiquidity(int, int, int)
+        | DecreaseLiquidity(int, int, int)
+        | Swap(address, int, int)
         | CollectFee(int, int, int)
         | CollectProtocolFee(address, int, int)
         | CollectFundFee(address, int, int)
@@ -120,6 +120,7 @@ main contract Pool =
 
     // --- Position management ---
 
+    // Opens a new concentrated liquidity position within the specified tick range
     stateful entrypoint open_position(
             tick_lower: int,
             tick_upper: int,
@@ -176,16 +177,18 @@ main contract Pool =
             tokens_owed_1 = 0
             }
         put(state { positions[pos_id] = pos, next_position_id = pos_id + 1 })
-        Chain.event(PositionOpened(Call.caller, pos_id, tick_lower, tick_upper, liquidity_desired, a0, a1))
+        Chain.event(PositionOpened(Call.caller, pos_id, liquidity_desired))
         pos_id
 
+    // Removes all liquidity, collects owed fees, and deletes the position
     stateful entrypoint close_position(position_id: int) : unit =
         require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
         let pos = state.positions[position_id]
         require(Call.caller == pos.owner, "UNAUTHORIZED")
 
         if(pos.liquidity > 0)
-            internal_decrease_liquidity(position_id, pos.liquidity)
+            let (_a0, _a1) = internal_decrease_liquidity(position_id, pos.liquidity)
+            ()
 
         let updated_pos = state.positions[position_id]
         if(updated_pos.tokens_owed_0 > 0)
@@ -196,6 +199,7 @@ main contract Pool =
         put(state { positions = Map.delete(position_id, state.positions) })
         Chain.event(PositionClosed(Call.caller, position_id))
 
+    // Adds liquidity to an existing position, settling accrued fees
     stateful entrypoint increase_liquidity(
             position_id: int,
             liquidity_delta: int,
@@ -227,8 +231,8 @@ main contract Pool =
         if(a1 > 0) state.token1.transfer_allowance(Call.caller, Contract.address, a1)
 
         let (fg0, fg1) = fee_growth_inside(pos.tick_lower, pos.tick_upper)
-        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / Q64
-        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / Q64
+        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / q64
+        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / q64
 
         update_tick(pos.tick_lower, liquidity_delta, false)
         update_tick(pos.tick_upper, -liquidity_delta, false)
@@ -242,10 +246,11 @@ main contract Pool =
             fee_growth_inside_last_1 = fg1,
             tokens_owed_0 = owed_0,
             tokens_owed_1 = owed_1
-        }})
-        Chain.event(IncreaseLiquidity(position_id, liquidity_delta, a0, a1))
+            }})
+        Chain.event(IncreaseLiquidity(position_id, liquidity_delta, a0))
         (a0, a1)
 
+    // Removes liquidity from a position with slippage protection
     stateful entrypoint decrease_liquidity(
             position_id: int,
             liquidity_delta: int,
@@ -263,14 +268,15 @@ main contract Pool =
         require(a1 >= amount_1_min, "SLIPPAGE_1")
         (a0, a1)
 
+    // Withdraws accumulated swap fees from a position up to the requested maximums
     stateful entrypoint collect_fees(position_id: int, amount_0_max: int, amount_1_max: int) : (int * int) =
         require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
         let pos = state.positions[position_id]
         require(Call.caller == pos.owner, "UNAUTHORIZED")
 
         let (fg0, fg1) = fee_growth_inside(pos.tick_lower, pos.tick_upper)
-        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / Q64
-        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / Q64
+        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / q64
+        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / q64
 
         let collect_0 = Math.min(amount_0_max, owed_0)
         let collect_1 = Math.min(amount_1_max, owed_1)
@@ -283,7 +289,7 @@ main contract Pool =
             fee_growth_inside_last_1 = fg1,
             tokens_owed_0 = owed_0 - collect_0,
             tokens_owed_1 = owed_1 - collect_1
-        }})
+            }})
         Chain.event(CollectFee(position_id, collect_0, collect_1))
         (collect_0, collect_1)
 
@@ -301,6 +307,7 @@ main contract Pool =
         ticks_crossed    : int
         }
 
+    // Executes a CLMM swap across ticks, splitting fees to protocol/fund/LP
     stateful entrypoint swap(
             zero_for_one: bool,
             amount_specified: int,
@@ -370,26 +377,24 @@ main contract Pool =
             if(amount_0 > 0)
                 state.token0.transfer(Call.caller, amount_0)
 
-        Chain.event(Swap(Call.caller, amount_0, amount_1, state.sqrt_price_x64, state.tick_current, state.liquidity))
+        Chain.event(Swap(Call.caller, amount_0, amount_1))
         (amount_0, amount_1)
 
     // --- Swap loop (recursive) ---
 
-    function swap_loop(
+    // Recursive tick-walking engine: iterates until amount exhausted, price limit, or tick cap
+    stateful function swap_loop(
             s: swap_state,
             zero_for_one: bool,
             is_exact_input: bool,
             price_limit: int,
             fee_cfg: IDexConfig.fee_config
         ) : swap_state =
-        if(s.amount_remaining == 0 || s.sqrt_price == price_limit || s.ticks_crossed >= MAX_TICKS_PER_SWAP)
+        if(s.amount_remaining == 0 || s.sqrt_price == price_limit || s.ticks_crossed >= max_ticks_per_swap)
             s
         else
             let tick_offset = s.tick / state.tick_spacing
-            let next_opt = if(zero_for_one)
-                    BitMap.next_initialized_bit_lte(state.tick_bitmap, tick_offset)
-                else
-                    BitMap.next_initialized_bit_gte(state.tick_bitmap, tick_offset + 1)
+            let next_opt = if(zero_for_one) BitMap.next_initialized_bit_lte(state.tick_bitmap, tick_offset) else BitMap.next_initialized_bit_gte(state.tick_bitmap, tick_offset + 1)
 
             let (tick_next, has_next) = switch(next_opt)
                 None => if(zero_for_one) (TickMath.min_tick, false) else (TickMath.max_tick, false)
@@ -398,35 +403,29 @@ main contract Pool =
             let tick_next_clamped = Math.max(TickMath.min_tick, Math.min(TickMath.max_tick, tick_next))
             let sqrt_price_next = TickMath.get_sqrt_price_at_tick(tick_next_clamped)
 
-            let sqrt_price_target = if(zero_for_one)
-                    Math.max(sqrt_price_next, price_limit)
-                else
-                    Math.min(sqrt_price_next, price_limit)
+            let sqrt_price_target = if(zero_for_one) Math.max(sqrt_price_next, price_limit) else Math.min(sqrt_price_next, price_limit)
 
             let (new_sqrt_price, amount_in, amount_out, fee_amount) =
                 compute_swap_step(s.sqrt_price, sqrt_price_target, s.liq, s.amount_remaining, fee_cfg.trade_fee_rate, is_exact_input)
 
-            let s1 = if(is_exact_input)
-                    s { amount_remaining = s.amount_remaining - amount_in - fee_amount,
-                        amount_calculated = s.amount_calculated + amount_out }
-                else
-                    s { amount_remaining = s.amount_remaining - amount_out,
-                        amount_calculated = s.amount_calculated + amount_in + fee_amount }
+            let delta_remain = if(is_exact_input) amount_in + fee_amount else amount_out
+            let delta_calc = if(is_exact_input) amount_out else amount_in + fee_amount
+            let s1 = s { amount_remaining = s.amount_remaining - delta_remain,
+                         amount_calculated = s.amount_calculated + delta_calc }
 
             let protocol_delta = fee_amount * fee_cfg.protocol_fee_rate / 1_000_000
             let fund_delta = fee_amount * fee_cfg.fund_fee_rate / 1_000_000
             let lp_fee = fee_amount - protocol_delta - fund_delta
 
-            let new_fee_growth = if(s1.liq > 0)
-                    s1.fee_growth_global + lp_fee * Q64 / s1.liq
-                else s1.fee_growth_global
+            let new_fee_growth = if(s1.liq > 0) s1.fee_growth_global + lp_fee * q64 / s1.liq else s1.fee_growth_global
 
             let s2 = s1 { sqrt_price = new_sqrt_price,
                           protocol_fee = s1.protocol_fee + protocol_delta,
                           fund_fee = s1.fund_fee + fund_delta,
                           fee_growth_global = new_fee_growth }
 
-            let s3 = if(new_sqrt_price == sqrt_price_next && has_next)
+            let s3 =
+                if(new_sqrt_price == sqrt_price_next && has_next)
                     let tick_data = Map.lookup_default(tick_next_clamped, state.ticks, default_tick())
                     cross_tick(tick_next_clamped, s2.fee_growth_global, zero_for_one)
                     let net_l = if(zero_for_one) -tick_data.liquidity_net else tick_data.liquidity_net
@@ -438,6 +437,7 @@ main contract Pool =
 
             swap_loop(s3, zero_for_one, is_exact_input, price_limit, fee_cfg)
 
+    // Single-tick step: computes new sqrt price, amounts in/out, and fee
     function compute_swap_step(
             sqrt_price_current: int,
             sqrt_price_target: int,
@@ -449,60 +449,34 @@ main contract Pool =
         let zero_for_one = sqrt_price_target =< sqrt_price_current
         if(is_exact_input)
             let amount_remaining_less_fee = amount_remaining * (1_000_000 - fee_rate) / 1_000_000
-            let amount_in_max = if(zero_for_one)
-                    LiquidityMath.get_delta_amount_0(sqrt_price_target, sqrt_price_current, liq, true)
-                else
-                    LiquidityMath.get_delta_amount_1(sqrt_price_current, sqrt_price_target, liq, true)
+            let amount_in_max = if(zero_for_one) LiquidityMath.get_delta_amount_0(sqrt_price_target, sqrt_price_current, liq, true) else LiquidityMath.get_delta_amount_1(sqrt_price_current, sqrt_price_target, liq, true)
 
             if(amount_in_max =< amount_remaining_less_fee)
-                let amount_out = if(zero_for_one)
-                        LiquidityMath.get_delta_amount_1(sqrt_price_target, sqrt_price_current, liq, false)
-                    else
-                        LiquidityMath.get_delta_amount_0(sqrt_price_current, sqrt_price_target, liq, false)
+                let amount_out = if(zero_for_one) LiquidityMath.get_delta_amount_1(sqrt_price_target, sqrt_price_current, liq, false) else LiquidityMath.get_delta_amount_0(sqrt_price_current, sqrt_price_target, liq, false)
                 let fee = Math.ceil_div(amount_in_max * fee_rate, 1_000_000 - fee_rate)
                 (sqrt_price_target, amount_in_max, amount_out, fee)
             else
-                let new_sqrt_price = if(zero_for_one)
-                        LiquidityMath.get_next_sqrt_price_from_amount_0(sqrt_price_current, liq, amount_remaining_less_fee, true)
-                    else
-                        LiquidityMath.get_next_sqrt_price_from_amount_1(sqrt_price_current, liq, amount_remaining_less_fee, true)
-                let actual_in = if(zero_for_one)
-                        LiquidityMath.get_delta_amount_0(new_sqrt_price, sqrt_price_current, liq, true)
-                    else
-                        LiquidityMath.get_delta_amount_1(sqrt_price_current, new_sqrt_price, liq, true)
-                let actual_out = if(zero_for_one)
-                        LiquidityMath.get_delta_amount_1(new_sqrt_price, sqrt_price_current, liq, false)
-                    else
-                        LiquidityMath.get_delta_amount_0(sqrt_price_current, new_sqrt_price, liq, false)
+                let new_sqrt_price = if(zero_for_one) LiquidityMath.get_next_sqrt_price_from_amount_0(sqrt_price_current, liq, amount_remaining_less_fee, true) else LiquidityMath.get_next_sqrt_price_from_amount_1(sqrt_price_current, liq, amount_remaining_less_fee, true)
+                let actual_in = if(zero_for_one) LiquidityMath.get_delta_amount_0(new_sqrt_price, sqrt_price_current, liq, true) else LiquidityMath.get_delta_amount_1(sqrt_price_current, new_sqrt_price, liq, true)
+                let actual_out = if(zero_for_one) LiquidityMath.get_delta_amount_1(new_sqrt_price, sqrt_price_current, liq, false) else LiquidityMath.get_delta_amount_0(sqrt_price_current, new_sqrt_price, liq, false)
                 let fee = amount_remaining - actual_in
                 (new_sqrt_price, actual_in, actual_out, fee)
         else
-            let amount_out_max = if(zero_for_one)
-                    LiquidityMath.get_delta_amount_1(sqrt_price_target, sqrt_price_current, liq, false)
-                else
-                    LiquidityMath.get_delta_amount_0(sqrt_price_current, sqrt_price_target, liq, false)
+            let amount_out_max = if(zero_for_one) LiquidityMath.get_delta_amount_1(sqrt_price_target, sqrt_price_current, liq, false) else LiquidityMath.get_delta_amount_0(sqrt_price_current, sqrt_price_target, liq, false)
 
             if(amount_out_max =< amount_remaining)
-                let amount_in = if(zero_for_one)
-                        LiquidityMath.get_delta_amount_0(sqrt_price_target, sqrt_price_current, liq, true)
-                    else
-                        LiquidityMath.get_delta_amount_1(sqrt_price_current, sqrt_price_target, liq, true)
+                let amount_in = if(zero_for_one) LiquidityMath.get_delta_amount_0(sqrt_price_target, sqrt_price_current, liq, true) else LiquidityMath.get_delta_amount_1(sqrt_price_current, sqrt_price_target, liq, true)
                 let fee = Math.ceil_div(amount_in * fee_rate, 1_000_000 - fee_rate)
                 (sqrt_price_target, amount_in, amount_out_max, fee)
             else
-                let new_sqrt_price = if(zero_for_one)
-                        LiquidityMath.get_next_sqrt_price_from_amount_1(sqrt_price_current, liq, amount_remaining, false)
-                    else
-                        LiquidityMath.get_next_sqrt_price_from_amount_0(sqrt_price_current, liq, amount_remaining, false)
-                let actual_in = if(zero_for_one)
-                        LiquidityMath.get_delta_amount_0(new_sqrt_price, sqrt_price_current, liq, true)
-                    else
-                        LiquidityMath.get_delta_amount_1(sqrt_price_current, new_sqrt_price, liq, true)
+                let new_sqrt_price = if(zero_for_one) LiquidityMath.get_next_sqrt_price_from_amount_1(sqrt_price_current, liq, amount_remaining, false) else LiquidityMath.get_next_sqrt_price_from_amount_0(sqrt_price_current, liq, amount_remaining, false)
+                let actual_in = if(zero_for_one) LiquidityMath.get_delta_amount_0(new_sqrt_price, sqrt_price_current, liq, true) else LiquidityMath.get_delta_amount_1(sqrt_price_current, new_sqrt_price, liq, true)
                 let fee = Math.ceil_div(actual_in * fee_rate, 1_000_000 - fee_rate)
                 (new_sqrt_price, actual_in, amount_remaining, fee)
 
     // --- Admin ---
 
+    // Protocol owner withdraws accrued CLMM protocol fees
     stateful entrypoint collect_protocol_fee(amount_0_requested: int, amount_1_requested: int) : (int * int) =
         require(Call.caller == state.config.protocol_owner(), "UNAUTHORIZED")
         let a0 = Math.min(amount_0_requested, state.protocol_fees_0)
@@ -513,6 +487,7 @@ main contract Pool =
         Chain.event(CollectProtocolFee(Call.caller, a0, a1))
         (a0, a1)
 
+    // Fund owner withdraws accrued CLMM fund fees
     stateful entrypoint collect_fund_fee(amount_0_requested: int, amount_1_requested: int) : (int * int) =
         require(Call.caller == state.config.fund_owner(), "UNAUTHORIZED")
         let a0 = Math.min(amount_0_requested, state.fund_fees_0)
@@ -523,6 +498,7 @@ main contract Pool =
         Chain.event(CollectFundFee(Call.caller, a0, a1))
         (a0, a1)
 
+    // Admin bitflag control: bit 0 = positions, bit 2 = swaps
     stateful entrypoint update_pool_status(new_status: int) : unit =
         require(Call.caller == state.config.admin(), "UNAUTHORIZED")
         let old = state.status
@@ -535,8 +511,9 @@ main contract Pool =
         { liquidity_net = 0, liquidity_gross = 0, fee_growth_outside_0 = 0, fee_growth_outside_1 = 0, initialized = false }
 
     function is_enabled(bit: int) : bool =
-        (state.status band (1 bsl bit)) == 0
+        (state.status band (1 << bit)) == 0
 
+    // Computes fee growth accumulated within a tick range using global-minus-outside math
     function fee_growth_inside(tick_lower: int, tick_upper: int) : (int * int) =
         let lower_tick = Map.lookup_default(tick_lower, state.ticks, default_tick())
         let upper_tick = Map.lookup_default(tick_upper, state.ticks, default_tick())
@@ -558,13 +535,15 @@ main contract Pool =
         (state.fee_growth_global_0 - fee_below_0 - fee_above_0,
          state.fee_growth_global_1 - fee_below_1 - fee_above_1)
 
+    // Updates tick liquidity and initializes fee-growth-outside on first reference
     stateful function update_tick(tick_index: int, liquidity_delta: int, is_upper_inverted: bool) =
         let tick = Map.lookup_default(tick_index, state.ticks, default_tick())
         let was_initialized = tick.initialized
         let new_gross = tick.liquidity_gross + Math.abs(liquidity_delta)
         let new_net = tick.liquidity_net + liquidity_delta
 
-        let (fo0, fo1) = if(!was_initialized && new_gross > 0)
+        let (fo0, fo1) =
+            if(!was_initialized && new_gross > 0)
                 if(state.tick_current >= tick_index)
                     (state.fee_growth_global_0, state.fee_growth_global_1)
                 else (0, 0)
@@ -583,14 +562,16 @@ main contract Pool =
             fee_growth_outside_0 = fo0,
             fee_growth_outside_1 = fo1,
             initialized = new_initialized
-        }})
+            }})
 
+    // Flips fee-growth-outside accumulators when price crosses an initialized tick
     stateful function cross_tick(tick_index: int, fee_growth_global_input: int, zero_for_one: bool) =
         let tick = Map.lookup_default(tick_index, state.ticks, default_tick())
         let new_outside_0 = state.fee_growth_global_0 - tick.fee_growth_outside_0
         let new_outside_1 = state.fee_growth_global_1 - tick.fee_growth_outside_1
         put(state { ticks[tick_index] = tick { fee_growth_outside_0 = new_outside_0, fee_growth_outside_1 = new_outside_1 } })
 
+    // Core removal logic: computes owed amounts, updates ticks, and settles accrued fees
     stateful function internal_decrease_liquidity(position_id: int, liquidity_delta: int) : (int * int) =
         let pos = state.positions[position_id]
         let sqrt_lower = TickMath.get_sqrt_price_at_tick(pos.tick_lower)
@@ -606,8 +587,8 @@ main contract Pool =
                  LiquidityMath.get_delta_amount_1(sqrt_lower, state.sqrt_price_x64, liquidity_delta, false))
 
         let (fg0, fg1) = fee_growth_inside(pos.tick_lower, pos.tick_upper)
-        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / Q64 + a0
-        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / Q64 + a1
+        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / q64 + a0
+        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / q64 + a1
 
         update_tick(pos.tick_lower, -liquidity_delta, true)
         update_tick(pos.tick_upper, liquidity_delta, true)
@@ -621,6 +602,6 @@ main contract Pool =
             fee_growth_inside_last_1 = fg1,
             tokens_owed_0 = owed_0,
             tokens_owed_1 = owed_1
-        }})
-        Chain.event(DecreaseLiquidity(position_id, liquidity_delta, a0, a1))
+            }})
+        Chain.event(DecreaseLiquidity(position_id, liquidity_delta, a0))
         (a0, a1)

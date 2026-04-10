@@ -4,7 +4,7 @@ import { assert } from "chai";
 import chaiAsPromised from "chai-as-promised";
 import { before, describe, it } from "mocha";
 import { deploySophiaContract, deployToken, deployDexConfig } from "./shared/fixtures.js";
-import { expectRevert, INITIAL_SUPPLY } from "./shared/utils.js";
+import { expectRevert, INITIAL_SUPPLY, contractToAccount } from "./shared/utils.js";
 
 chai.use(chaiAsPromised);
 
@@ -70,14 +70,15 @@ describe("PairFactory", () => {
     let createResult;
 
     before(async () => {
-      await token0.create_allowance(factory.$options.address, SEED_AMOUNT);
-      await token1.create_allowance(factory.$options.address, SEED_AMOUNT);
+      await token0.create_allowance(contractToAccount(factory.$options.address), SEED_AMOUNT);
+      await token1.create_allowance(contractToAccount(factory.$options.address), SEED_AMOUNT);
       createResult = await factory.initialize(
         token0.$options.address,
         token1.$options.address,
         SEED_AMOUNT,
         SEED_AMOUNT,
         0,
+        { omitUnknown: true },
       );
     });
 
@@ -93,7 +94,7 @@ describe("PairFactory", () => {
     });
 
     it("transfers tokens to the pair", async () => {
-      const pairAddress = createResult.decodedResult;
+      const pairAddress = contractToAccount(createResult.decodedResult);
       const bal0 = (await token0.balance(pairAddress)).decodedResult;
       const bal1 = (await token1.balance(pairAddress)).decodedResult;
       assert.equal(bal0, SEED_AMOUNT);
@@ -128,16 +129,40 @@ describe("PairFactory", () => {
     });
   });
 
-  describe("all_pairs", () => {
-    it("returns all created pairs", async () => {
-      const result = await factory.all_pairs();
+  describe("pair_count and pagination", () => {
+    it("pair_count returns correct count", async () => {
+      const result = await factory.pair_count();
+      assert.equal(result.decodedResult, 1n);
+    });
+
+    it("get_pair_at returns pair by index", async () => {
+      const result = await factory.get_pair_at(0);
+      assert.isTrue(typeof result.decodedResult === "string");
+      assert.isTrue(result.decodedResult.startsWith("ct_"));
+    });
+
+    it("get_pair_at reverts on out-of-bounds index", async () => {
+      await expectRevert(factory.get_pair_at(999), "INDEX_OUT_OF_BOUNDS");
+    });
+
+    it("get_pairs returns paginated list", async () => {
+      const result = await factory.get_pairs(0, 10);
       assert.isArray(result.decodedResult);
       assert.lengthOf(result.decodedResult, 1);
     });
 
-    it("all_pairs_length returns correct count", async () => {
-      const result = await factory.all_pairs_length();
-      assert.equal(result.decodedResult, 1n);
+    it("get_pairs with offset beyond count returns empty", async () => {
+      const result = await factory.get_pairs(100, 10);
+      assert.isArray(result.decodedResult);
+      assert.lengthOf(result.decodedResult, 0);
+    });
+
+    it("get_pairs reverts on negative offset", async () => {
+      await expectRevert(factory.get_pairs(-1, 10), "NEGATIVE_OFFSET");
+    });
+
+    it("get_pairs reverts on zero limit", async () => {
+      await expectRevert(factory.get_pairs(0, 0), "ZERO_LIMIT");
     });
   });
 
@@ -156,8 +181,8 @@ describe("PairFactory", () => {
     });
 
     it("reverts when pair already exists", async () => {
-      await token0.create_allowance(factory.$options.address, SEED_AMOUNT);
-      await token1.create_allowance(factory.$options.address, SEED_AMOUNT);
+      await token0.create_allowance(contractToAccount(factory.$options.address), SEED_AMOUNT);
+      await token1.create_allowance(contractToAccount(factory.$options.address), SEED_AMOUNT);
       await expectRevert(
         factory.initialize(
           token0.$options.address,
@@ -196,8 +221,8 @@ describe("PairFactory", () => {
       const newTokenA = await deployToken(aeSdk, "New A", "NTA", 18, INITIAL_SUPPLY);
       const newTokenB = await deployToken(aeSdk, "New B", "NTB", 18, INITIAL_SUPPLY);
 
-      await newTokenA.create_allowance(disabledFactory.$options.address, SEED_AMOUNT);
-      await newTokenB.create_allowance(disabledFactory.$options.address, SEED_AMOUNT);
+      await newTokenA.create_allowance(contractToAccount(disabledFactory.$options.address), SEED_AMOUNT);
+      await newTokenB.create_allowance(contractToAccount(disabledFactory.$options.address), SEED_AMOUNT);
 
       await expectRevert(
         disabledFactory.initialize(
@@ -215,8 +240,8 @@ describe("PairFactory", () => {
   describe("multiple pairs", () => {
     it("can create a second pair with different tokens", async () => {
       const tokenC = await deployToken(aeSdk, "Token C", "TKC", 18, INITIAL_SUPPLY);
-      await tokenC.create_allowance(factory.$options.address, SEED_AMOUNT);
-      await token0.create_allowance(factory.$options.address, SEED_AMOUNT);
+      await tokenC.create_allowance(contractToAccount(factory.$options.address), SEED_AMOUNT);
+      await token0.create_allowance(contractToAccount(factory.$options.address), SEED_AMOUNT);
 
       const result = await factory.initialize(
         token0.$options.address,
@@ -224,15 +249,16 @@ describe("PairFactory", () => {
         SEED_AMOUNT,
         SEED_AMOUNT,
         0,
+        { omitUnknown: true },
       );
 
       const pairAddress = result.decodedResult;
       assert.isTrue(pairAddress.startsWith("ct_"));
 
-      const length = await factory.all_pairs_length();
-      assert.equal(length.decodedResult, 2n);
+      const count = await factory.pair_count();
+      assert.equal(count.decodedResult, 2n);
 
-      const allPairs = await factory.all_pairs();
+      const allPairs = await factory.get_pairs(0, 100);
       assert.lengthOf(allPairs.decodedResult, 2);
     });
   });

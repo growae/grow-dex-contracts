@@ -7,7 +7,7 @@ import { deploySophiaContract, deployToken, deployDexConfig } from "./shared/fix
 import {
   MINIMUM_LIQUIDITY, sqrt, FEE_RATE_DENOMINATOR, INITIAL_SUPPLY,
   tradingFee, protocolFee, fundFee, creatorFee,
-  amountOut, amountIn, expectRevert, ceilDiv,
+  amountOut, amountIn, expectRevert, ceilDiv, contractToAccount,
 } from "./shared/utils.js";
 
 chai.use(chaiAsPromised);
@@ -118,8 +118,8 @@ describe("Pair", () => {
     let depositResult;
 
     before(async () => {
-      await token0.create_allowance(pair.$options.address, DEPOSIT_AMOUNT);
-      await token1.create_allowance(pair.$options.address, DEPOSIT_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), DEPOSIT_AMOUNT);
+      await token1.create_allowance(contractToAccount(pair.$options.address), DEPOSIT_AMOUNT);
       depositResult = await pair.deposit(DEPOSIT_AMOUNT, DEPOSIT_AMOUNT);
     });
 
@@ -129,7 +129,7 @@ describe("Pair", () => {
     });
 
     it("locks MINIMUM_LIQUIDITY in contract address", async () => {
-      const contractLp = await pair.lp_balance(pair.$options.address);
+      const contractLp = await pair.lp_balance(contractToAccount(pair.$options.address));
       assert.equal(contractLp.decodedResult, MINIMUM_LIQUIDITY);
     });
 
@@ -164,8 +164,8 @@ describe("Pair", () => {
     before(async () => {
       lpBefore = (await pair.lp_balance(admin.address)).decodedResult;
       totalSupplyBefore = (await pair.lp_total_supply()).decodedResult;
-      await token0.create_allowance(pair.$options.address, secondDeposit);
-      await token1.create_allowance(pair.$options.address, secondDeposit);
+      await token0.create_allowance(contractToAccount(pair.$options.address), secondDeposit);
+      await token1.create_allowance(contractToAccount(pair.$options.address), secondDeposit);
       secondDepositResult = await pair.deposit(secondDeposit, secondDeposit);
     });
 
@@ -236,7 +236,7 @@ describe("Pair", () => {
 
     before(async () => {
       reservesBefore = (await pair.get_reserves()).decodedResult;
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       swapResult = await pair.swap_base_input(
         token0.$options.address,
         SWAP_AMOUNT,
@@ -278,7 +278,7 @@ describe("Pair", () => {
 
     before(async () => {
       reservesBefore = (await pair.get_reserves()).decodedResult;
-      await token1.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token1.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       swapResult = await pair.swap_base_input(
         token1.$options.address,
         SWAP_AMOUNT,
@@ -313,7 +313,7 @@ describe("Pair", () => {
 
     before(async () => {
       const maxIn = SWAP_AMOUNT * 2n;
-      await token0.create_allowance(pair.$options.address, maxIn);
+      await token0.create_allowance(contractToAccount(pair.$options.address), maxIn);
       swapResult = await pair.swap_base_output(
         token0.$options.address,
         maxIn,
@@ -364,7 +364,7 @@ describe("Pair", () => {
     });
 
     it("emits CollectProtocolFee event", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0);
       const result = await pair.collect_protocol_fee(10n ** 30n, 10n ** 30n);
       const events = result.decodedEvents.filter(e => e.name === "CollectProtocolFee");
@@ -381,7 +381,7 @@ describe("Pair", () => {
 
   describe("collect_fund_fee", () => {
     it("fund owner can collect fees", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0);
 
       const [ff0Before, ff1Before] = (await pair.get_fund_fees()).decodedResult;
@@ -401,7 +401,7 @@ describe("Pair", () => {
 
   describe("collect_creator_fee", () => {
     it("creator can collect fees", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0);
 
       const [cf0Before, cf1Before] = (await pair.get_creator_fees()).decodedResult;
@@ -416,7 +416,7 @@ describe("Pair", () => {
     });
 
     it("emits CollectCreatorFee event", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0);
 
       const result = await pair.collect_creator_fee({ onAccount: creator });
@@ -506,14 +506,15 @@ describe("Pair", () => {
     });
 
     it("reverts swap_base_input with invalid token", async () => {
+      const dummyToken = await deployToken(aeSdk, "Dummy", "DMY", 18, 1000n);
       await expectRevert(
-        pair.swap_base_input(admin.address, SWAP_AMOUNT, 0),
+        pair.swap_base_input(dummyToken.$options.address, SWAP_AMOUNT, 0),
         "INVALID_TOKEN",
       );
     });
 
     it("reverts swap_base_input when slippage exceeded", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await expectRevert(
         pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 10n ** 30n),
         "SLIPPAGE_EXCEEDED",
@@ -528,7 +529,7 @@ describe("Pair", () => {
     });
 
     it("reverts swap_base_output when max_amount_in exceeded", async () => {
-      await token0.create_allowance(pair.$options.address, 1);
+      await token0.create_allowance(contractToAccount(pair.$options.address), 1);
       await expectRevert(
         pair.swap_base_output(token0.$options.address, 1, SWAP_AMOUNT / 2n),
         "SLIPPAGE_EXCEEDED",
@@ -560,8 +561,8 @@ describe("Pair", () => {
 
     it("disabling deposit (bit 0) prevents deposit", async () => {
       await pair.update_pool_status(1);
-      await token0.create_allowance(pair.$options.address, 1000);
-      await token1.create_allowance(pair.$options.address, 1000);
+      await token0.create_allowance(contractToAccount(pair.$options.address), 1000);
+      await token1.create_allowance(contractToAccount(pair.$options.address), 1000);
       await expectRevert(pair.deposit(1000, 1000), "DEPOSIT_DISABLED");
       await pair.update_pool_status(0);
     });
@@ -577,7 +578,7 @@ describe("Pair", () => {
 
     it("disabling swap (bit 2) prevents swap", async () => {
       await pair.update_pool_status(4);
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await expectRevert(
         pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0),
         "SWAP_DISABLED",
@@ -588,7 +589,7 @@ describe("Pair", () => {
 
   describe("oracle observations", () => {
     it("observation count increases after operations", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0);
 
       const reserves = await pair.get_reserves();
@@ -626,10 +627,10 @@ describe("Pair", () => {
 
   describe("reentrancy guard", () => {
     it("pair is unlocked after successful operations", async () => {
-      await token0.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token0.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token0.$options.address, SWAP_AMOUNT, 0);
 
-      await token1.create_allowance(pair.$options.address, SWAP_AMOUNT);
+      await token1.create_allowance(contractToAccount(pair.$options.address), SWAP_AMOUNT);
       await pair.swap_base_input(token1.$options.address, SWAP_AMOUNT, 0);
     });
   });

@@ -2,7 +2,7 @@ import { utils } from "@aeternity/aeproject";
 import { assert } from "chai";
 import { before, describe, it } from "mocha";
 import { deploySophiaContract, deployToken, deployDexConfig, deployWAE } from "./shared/fixtures.js";
-import { expectRevert } from "./shared/utils.js";
+import { expectRevert, contractToAccount } from "./shared/utils.js";
 
 describe("Router", () => {
   let aeSdk, accounts;
@@ -30,27 +30,27 @@ describe("Router", () => {
 
     const pairModel = await deploySophiaContract(
       aeSdk, "./contracts/cpmm/Pair.aes",
-      [config.address, 0, tokenA.address, tokenB.address, accounts[0].address, 0]
+      [config.$options.address, 0, tokenA.$options.address, tokenB.$options.address, accounts[0].address, 0]
     );
 
     factory = await deploySophiaContract(
       aeSdk, "./contracts/cpmm/PairFactory.aes",
-      [config.address, 0, pairModel.address, accounts[0].address]
+      [config.$options.address, 0, pairModel.$options.address, accounts[0].address]
     );
 
     // Create pair A/B with initial liquidity
-    await tokenA.create_allowance(factory.address, LIQUIDITY);
-    await tokenB.create_allowance(factory.address, LIQUIDITY);
-    await factory.initialize(tokenA.address, tokenB.address, LIQUIDITY, LIQUIDITY, 0);
+    await tokenA.create_allowance(contractToAccount(factory.$options.address), LIQUIDITY);
+    await tokenB.create_allowance(contractToAccount(factory.$options.address), LIQUIDITY);
+    await factory.initialize(tokenA.$options.address, tokenB.$options.address, LIQUIDITY, LIQUIDITY, 0, { omitUnknown: true });
 
     // Create pair B/C with initial liquidity
-    await tokenB.create_allowance(factory.address, LIQUIDITY);
-    await tokenC.create_allowance(factory.address, LIQUIDITY);
-    await factory.initialize(tokenB.address, tokenC.address, LIQUIDITY, LIQUIDITY, 0);
+    await tokenB.create_allowance(contractToAccount(factory.$options.address), LIQUIDITY);
+    await tokenC.create_allowance(contractToAccount(factory.$options.address), LIQUIDITY);
+    await factory.initialize(tokenB.$options.address, tokenC.$options.address, LIQUIDITY, LIQUIDITY, 0, { omitUnknown: true });
 
     router = await deploySophiaContract(
       aeSdk, "./contracts/Router.aes",
-      [factory.address, wae.address]
+      [factory.$options.address, wae.$options.address]
     );
   });
 
@@ -58,10 +58,11 @@ describe("Router", () => {
     it("swaps single hop A→B", async () => {
       const balBBefore = (await tokenB.balance(accounts[0].address)).decodedResult ?? 0n;
 
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       const result = await router.swap_base_input(
-        tokenA.address, SWAP_AMOUNT, 1n,
-        [tokenA.address, tokenB.address], FAR_DEADLINE
+        tokenA.$options.address, SWAP_AMOUNT, 1n,
+        [tokenA.$options.address, tokenB.$options.address], FAR_DEADLINE,
+        { omitUnknown: true },
       );
       const amountOut = result.decodedResult;
 
@@ -75,10 +76,11 @@ describe("Router", () => {
     it("swaps multi-hop A→B→C", async () => {
       const balCBefore = (await tokenC.balance(accounts[0].address)).decodedResult ?? 0n;
 
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       const result = await router.swap_base_input(
-        tokenA.address, SWAP_AMOUNT, 1n,
-        [tokenA.address, tokenB.address, tokenC.address], FAR_DEADLINE
+        tokenA.$options.address, SWAP_AMOUNT, 1n,
+        [tokenA.$options.address, tokenB.$options.address, tokenC.$options.address], FAR_DEADLINE,
+        { omitUnknown: true },
       );
       const amountOut = result.decodedResult;
 
@@ -89,11 +91,11 @@ describe("Router", () => {
     });
 
     it("reverts on expired deadline", async () => {
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       await expectRevert(
         router.swap_base_input(
-          tokenA.address, SWAP_AMOUNT, 1n,
-          [tokenA.address, tokenB.address], 0
+          tokenA.$options.address, SWAP_AMOUNT, 1n,
+          [tokenA.$options.address, tokenB.$options.address], 0
         ),
         "EXPIRED"
       );
@@ -102,30 +104,30 @@ describe("Router", () => {
     it("reverts on zero input amount", async () => {
       await expectRevert(
         router.swap_base_input(
-          tokenA.address, 0, 0,
-          [tokenA.address, tokenB.address], FAR_DEADLINE
+          tokenA.$options.address, 0, 0,
+          [tokenA.$options.address, tokenB.$options.address], FAR_DEADLINE
         ),
         "ZERO_INPUT"
       );
     });
 
     it("reverts on single-token path", async () => {
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       await expectRevert(
         router.swap_base_input(
-          tokenA.address, SWAP_AMOUNT, 1n,
-          [tokenA.address], FAR_DEADLINE
+          tokenA.$options.address, SWAP_AMOUNT, 1n,
+          [tokenA.$options.address], FAR_DEADLINE
         ),
         "INVALID_PATH"
       );
     });
 
     it("reverts when minimum output exceeds actual output", async () => {
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       await expectRevert(
         router.swap_base_input(
-          tokenA.address, SWAP_AMOUNT, SWAP_AMOUNT,
-          [tokenA.address, tokenB.address], FAR_DEADLINE
+          tokenA.$options.address, SWAP_AMOUNT, SWAP_AMOUNT,
+          [tokenA.$options.address, tokenB.$options.address], FAR_DEADLINE
         ),
         "SLIPPAGE_EXCEEDED"
       );
@@ -133,11 +135,11 @@ describe("Router", () => {
 
     it("reverts when pair not found in path", async () => {
       const tokenD = await deployToken(aeSdk, "TokenD", "TKD", 18, SUPPLY);
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       await expectRevert(
         router.swap_base_input(
-          tokenA.address, SWAP_AMOUNT, 1n,
-          [tokenA.address, tokenD.address], FAR_DEADLINE
+          tokenA.$options.address, SWAP_AMOUNT, 1n,
+          [tokenA.$options.address, tokenD.$options.address], FAR_DEADLINE
         ),
         "PAIR_NOT_FOUND"
       );
@@ -149,10 +151,11 @@ describe("Router", () => {
       const desiredOut = SWAP_AMOUNT / 2n;
       const balBBefore = (await tokenB.balance(accounts[0].address)).decodedResult ?? 0n;
 
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       const result = await router.swap_base_output(
-        tokenA.address, SWAP_AMOUNT, desiredOut,
-        [tokenA.address, tokenB.address], FAR_DEADLINE
+        tokenA.$options.address, SWAP_AMOUNT, desiredOut,
+        [tokenA.$options.address, tokenB.$options.address], FAR_DEADLINE,
+        { omitUnknown: true },
       );
       const amountSpent = result.decodedResult;
 
@@ -167,10 +170,11 @@ describe("Router", () => {
       const desiredOut = SWAP_AMOUNT / 10n;
       const balABefore = (await tokenA.balance(accounts[0].address)).decodedResult ?? 0n;
 
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       const result = await router.swap_base_output(
-        tokenA.address, SWAP_AMOUNT, desiredOut,
-        [tokenA.address, tokenB.address], FAR_DEADLINE
+        tokenA.$options.address, SWAP_AMOUNT, desiredOut,
+        [tokenA.$options.address, tokenB.$options.address], FAR_DEADLINE,
+        { omitUnknown: true },
       );
       const amountSpent = result.decodedResult;
 
@@ -180,11 +184,11 @@ describe("Router", () => {
     });
 
     it("reverts on expired deadline", async () => {
-      await tokenA.create_allowance(router.address, SWAP_AMOUNT);
+      await tokenA.create_allowance(contractToAccount(router.$options.address), SWAP_AMOUNT);
       await expectRevert(
         router.swap_base_output(
-          tokenA.address, SWAP_AMOUNT, SWAP_AMOUNT / 2n,
-          [tokenA.address, tokenB.address], 0
+          tokenA.$options.address, SWAP_AMOUNT, SWAP_AMOUNT / 2n,
+          [tokenA.$options.address, tokenB.$options.address], 0
         ),
         "EXPIRED"
       );
@@ -193,8 +197,8 @@ describe("Router", () => {
     it("reverts on zero output amount", async () => {
       await expectRevert(
         router.swap_base_output(
-          tokenA.address, SWAP_AMOUNT, 0,
-          [tokenA.address, tokenB.address], FAR_DEADLINE
+          tokenA.$options.address, SWAP_AMOUNT, 0,
+          [tokenA.$options.address, tokenB.$options.address], FAR_DEADLINE
         ),
         "ZERO_OUTPUT"
       );

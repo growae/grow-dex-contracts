@@ -2,26 +2,28 @@
 
 include "../interfaces/IAEX9.aes"
 include "../interfaces/IDexConfig.aes"
-include "./Pair.aes"
+include "../interfaces/IPair.aes"
 
 main contract PairFactory =
     record state = {
         admin        : address,
         config       : IDexConfig,
         config_index : int,
-        pair_model   : Pair,
-        pairs        : map(address * address, Pair),
-        all_pairs    : list(Pair),
+        pair_model   : IPair,
+        pairs        : map(address * address, IPair),
+        all_pairs    : map(int, IPair),
+        pair_count   : int,
         create_pool_fee_receiver : address
         }
 
     datatype event
-        = PairCreated(IAEX9, IAEX9, Pair, int)
+        = PairCreated(IAEX9, IAEX9, int)
 
+    // Sets up factory with DexConfig, fee tier index, and a Pair template for cloning
     entrypoint init(
             config: IDexConfig,
             config_index: int,
-            pair_model: Pair,
+            pair_model: IPair,
             fee_receiver: address
         ) = {
         admin = Call.caller,
@@ -29,24 +31,38 @@ main contract PairFactory =
         config_index = config_index,
         pair_model = pair_model,
         pairs = {},
-        all_pairs = [],
+        all_pairs = {},
+        pair_count = 0,
         create_pool_fee_receiver = fee_receiver
         }
 
-    entrypoint get_pair(token_a: IAEX9, token_b: IAEX9) : option(Pair) =
+    // Looks up the CPMM pair for a token pair, returns None if not yet created
+    entrypoint get_pair(token_a: IAEX9, token_b: IAEX9) : option(IPair) =
         let (t0, t1) = sort_tokens(token_a, token_b)
         Map.lookup((t0.address, t1.address), state.pairs)
 
-    entrypoint all_pairs() : list(Pair) = state.all_pairs
-    entrypoint all_pairs_length() : int = List.length(state.all_pairs)
+    entrypoint pair_count() : int = state.pair_count
 
+    // O(1) lookup by index
+    entrypoint get_pair_at(index: int) : IPair =
+        require(index >= 0 && index < state.pair_count, "INDEX_OUT_OF_BOUNDS")
+        state.all_pairs[index]
+
+    // Bounded paginated retrieval — returns up to `limit` pairs starting at `offset`
+    entrypoint get_pairs(offset: int, limit: int) : list(IPair) =
+        require(offset >= 0, "NEGATIVE_OFFSET")
+        require(limit > 0, "ZERO_LIMIT")
+        let end = min(offset + limit, state.pair_count)
+        collect_range(end - 1, offset, [])
+
+    // Deploys a new CPMM pair via Chain.clone, seeds initial liquidity, collects creation fee
     payable stateful entrypoint initialize(
             token_a: IAEX9,
             token_b: IAEX9,
             amount_0: int,
             amount_1: int,
             open_time: int
-        ) : Pair =
+        ) : IPair =
         require(token_a.address != token_b.address, "IDENTICAL_TOKENS")
         let (t0, t1) = sort_tokens(token_a, token_b)
         require(!Map.member((t0.address, t1.address), state.pairs), "PAIR_EXISTS")
@@ -62,7 +78,7 @@ main contract PairFactory =
 
         let (a0, a1) = if(token_a.address == t0.address) (amount_0, amount_1) else (amount_1, amount_0)
 
-        let pair : Pair = Chain.clone(
+        let pair : IPair = Chain.clone(
             ref = state.pair_model,
             state.config,
             state.config_index,
@@ -75,10 +91,21 @@ main contract PairFactory =
         t0.transfer(pair.address, a0)
         t1.transfer(pair.address, a1)
 
+        let idx = state.pair_count
         put(state { pairs[(t0.address, t1.address)] = pair,
-                    all_pairs = pair :: state.all_pairs })
-        Chain.event(PairCreated(t0, t1, pair, List.length(state.all_pairs)))
+                    all_pairs[idx] = pair,
+                    pair_count = idx + 1 })
+        Chain.event(PairCreated(t0, t1, idx + 1))
         pair
 
+    // Canonical ordering: lower address first, ensuring (A,B) and (B,A) map to same pair
     function sort_tokens(a: IAEX9, b: IAEX9) : (IAEX9 * IAEX9) =
         if(a.address < b.address) (a, b) else (b, a)
+
+    function min(a: int, b: int) : int =
+        if(a < b) a else b
+
+    // Iterates backwards from end-1 to offset, prepending to build forward-ordered result
+    private function collect_range(j: int, stop: int, acc: list(IPair)) : list(IPair) =
+        if(j < stop) acc
+        else collect_range(j - 1, stop, state.all_pairs[j] :: acc)
