@@ -49,7 +49,7 @@ payable main contract Router =
         ) : int =
         require(Chain.timestamp =< deadline, "EXPIRED")
         require(amount_out > 0, "ZERO_OUTPUT")
-        require(List.length(path) >= 2, "INVALID_PATH")
+        require(List.length(path) == 2, "EXACT_OUTPUT_SINGLE_HOP_ONLY")
         require(input_token.address == list_head(path).address, "TOKEN_PATH_MISMATCH")
         input_token.transfer_allowance(Call.caller, Contract.address, max_amount_in)
         let token_in : IAEX9 = list_head(path)
