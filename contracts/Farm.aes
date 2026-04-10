@@ -5,7 +5,7 @@ include "./interfaces/IAEX9.aes"
 include "./lib/Math.aes"
 
 main contract Farm =
-    let Q64 : int = 18446744073709551616
+    let q64 = 18446744073709551616
 
     record farm_pool = {
         lp_token             : IAEX9,
@@ -31,7 +31,7 @@ main contract Farm =
         }
 
     datatype event
-        = FarmCreated(int, IAEX9, IAEX9, int)
+        = FarmCreated(int, IAEX9, int)
         | Deposited(int, address, int)
         | Withdrawn(int, address, int)
         | RewardClaimed(int, address, int)
@@ -52,21 +52,17 @@ main contract Farm =
     entrypoint get_user_info(farm_id: int, user: address) : user_info =
         Map.lookup_default((farm_id, user), state.user_stakes, { staked_amount = 0, reward_debt = 0 })
 
+    // Read-only: projects unclaimed reward using current time and accumulator
     entrypoint pending_reward(farm_id: int, user: address) : int =
         require(Map.member(farm_id, state.farms), "FARM_NOT_FOUND")
         let farm = state.farms[farm_id]
         let ui = get_user_info(farm_id, user)
-        if(ui.staked_amount == 0) 0
+        if(ui.staked_amount == 0)
+            0
         else
-            let current_time = Math.min(Chain.timestamp, farm.end_time)
-            let time_elapsed = if(current_time > farm.last_update_time) current_time - farm.last_update_time else 0
-            let acc = if(farm.total_staked > 0 && time_elapsed > 0)
-                let reward = time_elapsed * farm.reward_per_second
-                farm.acc_reward_per_share + reward * Q64 / farm.total_staked
-            else
-                farm.acc_reward_per_share
-            ui.staked_amount * acc / Q64 - ui.reward_debt
+            compute_pending(farm, ui)
 
+    // Registers a new reward pool with LP/reward tokens, emission rate, and time window
     stateful entrypoint create_farm(
             lp_token: IAEX9,
             reward_token: IAEX9,
@@ -89,9 +85,10 @@ main contract Farm =
             total_staked = 0
             }
         put(state { farms[farm_id] = farm, next_farm_id = farm_id + 1 })
-        Chain.event(FarmCreated(farm_id, lp_token, reward_token, reward_per_second))
+        Chain.event(FarmCreated(farm_id, lp_token, reward_per_second))
         farm_id
 
+    // Transfers reward tokens into the farm contract to fund future distributions
     stateful entrypoint fund_farm(farm_id: int, amount: int) : unit =
         require(Map.member(farm_id, state.farms), "FARM_NOT_FOUND")
         require(amount > 0, "ZERO_AMOUNT")
@@ -99,6 +96,7 @@ main contract Farm =
         farm.reward_token.transfer_allowance(Call.caller, Contract.address, amount)
         Chain.event(FarmFunded(farm_id, amount))
 
+    // Stakes LP tokens into a farm, auto-claiming any pending reward first
     stateful entrypoint deposit(farm_id: int, amount: int) : unit =
         require(Map.member(farm_id, state.farms), "FARM_NOT_FOUND")
         require(amount > 0, "ZERO_AMOUNT")
@@ -107,7 +105,7 @@ main contract Farm =
         let ui = get_user_info(farm_id, Call.caller)
 
         if(ui.staked_amount > 0)
-            let pending = ui.staked_amount * farm.acc_reward_per_share / Q64 - ui.reward_debt
+            let pending = ui.staked_amount * farm.acc_reward_per_share / q64 - ui.reward_debt
             if(pending > 0)
                 farm.reward_token.transfer(Call.caller, pending)
                 Chain.event(RewardClaimed(farm_id, Call.caller, pending))
@@ -120,11 +118,12 @@ main contract Farm =
             farms[farm_id] = updated_farm { total_staked = updated_farm.total_staked + amount },
             user_stakes[(farm_id, Call.caller)] = {
                 staked_amount = new_staked,
-                reward_debt = new_staked * updated_farm.acc_reward_per_share / Q64
-            }
-        })
+                reward_debt = new_staked * updated_farm.acc_reward_per_share / q64
+                }
+            })
         Chain.event(Deposited(farm_id, Call.caller, amount))
 
+    // Unstakes LP tokens from a farm, auto-claiming any pending reward first
     stateful entrypoint withdraw(farm_id: int, amount: int) : unit =
         require(Map.member(farm_id, state.farms), "FARM_NOT_FOUND")
         require(amount > 0, "ZERO_AMOUNT")
@@ -133,7 +132,7 @@ main contract Farm =
         let ui = get_user_info(farm_id, Call.caller)
         require(ui.staked_amount >= amount, "INSUFFICIENT_STAKE")
 
-        let pending = ui.staked_amount * farm.acc_reward_per_share / Q64 - ui.reward_debt
+        let pending = ui.staked_amount * farm.acc_reward_per_share / q64 - ui.reward_debt
         if(pending > 0)
             farm.reward_token.transfer(Call.caller, pending)
             Chain.event(RewardClaimed(farm_id, Call.caller, pending))
@@ -146,11 +145,12 @@ main contract Farm =
             farms[farm_id] = updated_farm { total_staked = updated_farm.total_staked - amount },
             user_stakes[(farm_id, Call.caller)] = {
                 staked_amount = new_staked,
-                reward_debt = new_staked * updated_farm.acc_reward_per_share / Q64
-            }
-        })
+                reward_debt = new_staked * updated_farm.acc_reward_per_share / q64
+                }
+            })
         Chain.event(Withdrawn(farm_id, Call.caller, amount))
 
+    // Harvests accrued reward without changing stake amount
     stateful entrypoint claim(farm_id: int) : int =
         require(Map.member(farm_id, state.farms), "FARM_NOT_FOUND")
         update_farm(farm_id)
@@ -158,26 +158,32 @@ main contract Farm =
         let ui = get_user_info(farm_id, Call.caller)
         require(ui.staked_amount > 0, "NO_STAKE")
 
-        let pending = ui.staked_amount * farm.acc_reward_per_share / Q64 - ui.reward_debt
+        let pending = ui.staked_amount * farm.acc_reward_per_share / q64 - ui.reward_debt
         if(pending > 0)
             farm.reward_token.transfer(Call.caller, pending)
 
         put(state {
             user_stakes[(farm_id, Call.caller)] = ui {
-                reward_debt = ui.staked_amount * farm.acc_reward_per_share / Q64
-            }
-        })
+                reward_debt = ui.staked_amount * farm.acc_reward_per_share / q64
+                }
+            })
         Chain.event(RewardClaimed(farm_id, Call.caller, pending))
         pending
 
+    // MasterChef-style: accrues reward-per-share based on elapsed time and total staked
     stateful function update_farm(farm_id: int) : unit =
         let farm = state.farms[farm_id]
         let current_time = Math.min(Chain.timestamp, farm.end_time)
         if(current_time > farm.last_update_time)
             let time_elapsed = current_time - farm.last_update_time
-            let new_acc = if(farm.total_staked > 0)
-                let reward = time_elapsed * farm.reward_per_second
-                farm.acc_reward_per_share + reward * Q64 / farm.total_staked
-            else
-                farm.acc_reward_per_share
+            let extra = if(farm.total_staked > 0) time_elapsed * farm.reward_per_second * q64 / farm.total_staked else 0
+            let new_acc = farm.acc_reward_per_share + extra
             put(state { farms[farm_id] = farm { acc_reward_per_share = new_acc, last_update_time = current_time } })
+
+    // Pure calculation: simulates update_farm + reward formula without state changes
+    function compute_pending(farm: farm_pool, ui: user_info) : int =
+        let current_time = Math.min(Chain.timestamp, farm.end_time)
+        let time_elapsed = if(current_time > farm.last_update_time) current_time - farm.last_update_time else 0
+        let extra_reward = if(farm.total_staked > 0 && time_elapsed > 0) time_elapsed * farm.reward_per_second * q64 / farm.total_staked else 0
+        let acc = farm.acc_reward_per_share + extra_reward
+        ui.staked_amount * acc / q64 - ui.reward_debt

@@ -20,6 +20,7 @@ payable main contract Router =
 
     // --- CPMM Swaps ---
 
+    // Multi-hop exact-input swap: walks the token path, swapping through each pair
     stateful entrypoint swap_base_input(
             input_token: IAEX9,
             amount_in: int,
@@ -37,6 +38,7 @@ payable main contract Router =
         output_token.transfer(Call.caller, final_amount)
         final_amount
 
+    // Single-pair exact-output swap: computes required input and refunds excess
     stateful entrypoint swap_base_output(
             input_token: IAEX9,
             max_amount_in: int,
@@ -63,6 +65,7 @@ payable main contract Router =
 
     // --- Internal helpers ---
 
+    // Recursive helper: chains swap_base_input calls along the token path
     stateful function swap_hops_input(amount: int, path: list(IAEX9)) : int =
         switch(path)
             [_single] => amount
@@ -77,6 +80,7 @@ payable main contract Router =
                     _ => swap_hops_input(out, token_out :: rest)
             _ => abort("INVALID_PATH")
 
+    // Recursively finds the final token in a swap path list
     function last_token(path: list(IAEX9)) : IAEX9 =
         switch(path)
             [x] => x

@@ -30,16 +30,19 @@ payable main contract WAE =
     entrypoint allowance(accounts: allowance_accounts) : option(int) =
         Map.lookup(accounts, state.allowances)
 
+    // Wraps native AE sent with the call into WAE tokens for the caller
     payable stateful entrypoint deposit() : unit =
         require(Call.value > 0, "WAE_ZERO_DEPOSIT")
         put(state { balances[Call.caller = 0] @ b = b + Call.value })
         Chain.event(Deposit(Call.caller, Call.value))
 
+    // Wraps native AE into WAE credited to an arbitrary recipient
     payable stateful entrypoint deposit_to(to: address) : unit =
         require(Call.value > 0, "WAE_ZERO_DEPOSIT")
         put(state { balances[to = 0] @ b = b + Call.value })
         Chain.event(Deposit(to, Call.value))
 
+    // Burns WAE and sends equivalent native AE back to the caller
     stateful entrypoint withdraw(amount: int) : unit =
         require(amount > 0, "WAE_ZERO_WITHDRAW")
         let bal = Map.lookup_default(Call.caller, state.balances, 0)
@@ -48,6 +51,7 @@ payable main contract WAE =
         Chain.spend(Call.caller, amount)
         Chain.event(Withdrawal(Call.caller, amount))
 
+    // Moves WAE from caller to recipient
     stateful entrypoint transfer(to: address, amount: int) : unit =
         require(amount > 0, "NEGATIVE_AMOUNT")
         let from_bal = Map.lookup_default(Call.caller, state.balances, 0)
@@ -56,6 +60,7 @@ payable main contract WAE =
                     balances[to = 0] @ b = b + amount })
         Chain.event(Transfer(Call.caller, to, amount))
 
+    // Sets exact WAE spending allowance for a spender
     stateful entrypoint create_allowance(spender: address, amount: int) : unit =
         require(amount >= 0, "NEGATIVE_ALLOWANCE")
         let accounts = { from_account = Call.caller, for_account = spender }
@@ -70,6 +75,7 @@ payable main contract WAE =
         put(state { allowances[accounts] = new_amount })
         Chain.event(Approval(Call.caller, spender, new_amount))
 
+    // Spends WAE from another account using caller's allowance
     stateful entrypoint transfer_allowance(from: address, to: address, amount: int) : unit =
         require(amount > 0, "NEGATIVE_AMOUNT")
         let accounts = { from_account = from, for_account = Call.caller }

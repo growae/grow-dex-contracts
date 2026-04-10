@@ -1,12 +1,15 @@
 @compiler >= 8
 
 namespace BitMap =
+    // True if the tick-spacing slot for bit_pos is marked initialized in this bitmap word.
     function is_initialized(bitmap: int, bit_pos: int) : bool =
         (bitmap band (1 << bit_pos)) != 0
 
+    // XOR toggles the tick bit when liquidity is added or fully removed at that spacing index.
     function flip_bit(bitmap: int, bit_pos: int) : int =
         bitmap bxor (1 << bit_pos)
 
+    // MSB among bits [0..bit_pos]: nearest initialized tick at or below bit_pos (None if empty prefix).
     function next_initialized_bit_lte(bitmap: int, bit_pos: int) : option(int) =
         if(bit_pos < 0) None
         else
@@ -15,12 +18,14 @@ namespace BitMap =
             if(masked == 0) None
             else Some(msb(masked))
 
+    // LSB among bits ≥ bit_pos: nearest initialized tick at or above bit_pos (None if no upper bits set).
     function next_initialized_bit_gte(bitmap: int, bit_pos: int) : option(int) =
         let mask = bnot((1 << bit_pos) - 1)
         let masked = bitmap band mask
         if(masked == 0) None
         else Some(lsb(masked))
 
+    // Index of highest set bit via repeated right shift (log2 floor for positive x).
     function msb(x: int) : int =
         require(x > 0, "MSB_OF_ZERO")
         msb_loop(x, 0)
@@ -29,6 +34,7 @@ namespace BitMap =
         if(x =< 1) bit
         else msb_loop(x >> 1, bit + 1)
 
+    // Index of lowest set bit via repeated shift until bit 0 is set.
     function lsb(x: int) : int =
         require(x > 0, "LSB_OF_ZERO")
         lsb_loop(x, 0)

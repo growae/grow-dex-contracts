@@ -32,6 +32,7 @@ main contract TestToken =
     entrypoint balance(account: address) : option(int) = Map.lookup(account, state.balances)
     entrypoint allowance(accounts: allowance_accounts) : option(int) = Map.lookup(accounts, state.allowances)
 
+    // Moves tokens from caller to recipient, reverts on insufficient balance
     stateful entrypoint transfer(to: address, amount: int) : unit =
         require(amount > 0, "NEGATIVE_AMOUNT")
         let from_bal = Map.lookup_default(Call.caller, state.balances, 0)
@@ -40,12 +41,14 @@ main contract TestToken =
                     balances[to = 0] @ b = b + amount })
         Chain.event(Transfer(Call.caller, to, amount))
 
+    // Sets exact spending allowance for a spender, overwriting any previous value
     stateful entrypoint create_allowance(spender: address, amount: int) : unit =
         require(amount >= 0, "NEGATIVE_ALLOWANCE")
         let accounts = { from_account = Call.caller, for_account = spender }
         put(state { allowances[accounts] = amount })
         Chain.event(Approval(Call.caller, spender, amount))
 
+    // Adjusts existing allowance by a delta (can be negative to decrease)
     stateful entrypoint change_allowance(spender: address, amount_change: int) : unit =
         let accounts = { from_account = Call.caller, for_account = spender }
         let current = Map.lookup_default(accounts, state.allowances, 0)
@@ -54,6 +57,7 @@ main contract TestToken =
         put(state { allowances[accounts] = new_amount })
         Chain.event(Approval(Call.caller, spender, new_amount))
 
+    // Spends from another account's allowance, debiting both balance and approval
     stateful entrypoint transfer_allowance(from: address, to: address, amount: int) : unit =
         require(amount > 0, "NEGATIVE_AMOUNT")
         let accounts = { from_account = from, for_account = Call.caller }
@@ -66,6 +70,7 @@ main contract TestToken =
                     allowances[accounts] = allowed - amount })
         Chain.event(Transfer(from, to, amount))
 
+    // Owner-only: creates new tokens and credits them to a recipient
     stateful entrypoint mint(to: address, amount: int) : unit =
         require(Call.caller == state.owner, "UNAUTHORIZED")
         require(amount > 0, "NEGATIVE_AMOUNT")

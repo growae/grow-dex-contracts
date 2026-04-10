@@ -10,19 +10,23 @@ namespace Math =
     function abs(x: int): int =
         if(x < 0) -x else x
 
+    // Rounds up so integer division never under-charges fees or under-allocates token amounts.
     function ceil_div(a: int, b: int): int =
         require(b != 0, "MATH_DIV_ZERO")
         if(a == 0) 0
         else (a + b - 1) / b
 
+    // Floor of (a*b)/denom; product must fit int — callers size inputs to avoid overflow.
     function mul_div(a: int, b: int, denom: int): int =
         require(denom != 0, "MATH_DIV_ZERO")
         (a * b) / denom
 
+    // Ceil of (a*b)/denom so rounding never short-changes the side that should receive the full share.
     function mul_div_ceil(a: int, b: int, denom: int): int =
         require(denom != 0, "MATH_DIV_ZERO")
         ceil_div(a * b, denom)
 
+    // Integer floor(sqrt(y)) via Babylonian / Newton iteration (loop_sqrt).
     function sqrt(y: int): int =
         require(y >= 0, "MATH_NEGATIVE_SQRT")
         if(y > 3)
@@ -31,6 +35,7 @@ namespace Math =
         elif(y != 0) 1
         else 0
 
+    // Refines x toward sqrt(y); z tracks previous x until x >= z, then returns floor sqrt.
     private function loop_sqrt(y: int, x: int, z: int): int =
         if(x < z)
             let new_x = (y / x + x) / 2
