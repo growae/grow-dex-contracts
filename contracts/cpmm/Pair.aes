@@ -371,6 +371,7 @@ main contract Pair =
 
     // Re-reads token balances and updates reserves and TWAP oracle
     stateful entrypoint sync() : unit =
+        require_unlocked()
         update_reserves_and_oracle()
 
     // Sends any excess token balance beyond reserves + accrued fees to recipient
