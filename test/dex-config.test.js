@@ -196,7 +196,7 @@ describe("DexConfig", () => {
     it("reverts when fee validation fails after update", async () => {
       await expectRevert(
         config.update_amm_config(cfgIndex, 0, 999999),
-        "FEE_TOO_HIGH"
+        "TRADE_FEE_EXCEEDS_10_PERCENT"
       );
     });
 
