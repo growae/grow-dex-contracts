@@ -1,0 +1,82 @@
+@compiler >= 8
+
+include "../interfaces/IAEX9.aes"
+include "../interfaces/IDexConfig.aes"
+include "./Pair.aes"
+
+main contract PairFactory =
+    record state = {
+        admin        : address,
+        config       : IDexConfig,
+        config_index : int,
+        pair_model   : Pair,
+        pairs        : map(address * address, Pair),
+        all_pairs    : list(Pair),
+        create_pool_fee_receiver : address
+    }
+
+    datatype event
+        = PairCreated(IAEX9, IAEX9, Pair, int)
+
+    entrypoint init(
+            config: IDexConfig,
+            config_index: int,
+            pair_model: Pair,
+            fee_receiver: address
+        ) = {
+        admin = Call.caller,
+        config = config,
+        config_index = config_index,
+        pair_model = pair_model,
+        pairs = {},
+        all_pairs = [],
+        create_pool_fee_receiver = fee_receiver
+    }
+
+    entrypoint get_pair(token_a: IAEX9, token_b: IAEX9) : option(Pair) =
+        let (t0, t1) = sort_tokens(token_a, token_b)
+        Map.lookup((t0.address, t1.address), state.pairs)
+
+    entrypoint all_pairs() : list(Pair) = state.all_pairs
+    entrypoint all_pairs_length() : int = List.length(state.all_pairs)
+
+    payable stateful entrypoint initialize(
+            token_a: IAEX9,
+            token_b: IAEX9,
+            amount_0: int,
+            amount_1: int,
+            open_time: int
+        ) : Pair =
+        require(token_a.address != token_b.address, "IDENTICAL_TOKENS")
+        let (t0, t1) = sort_tokens(token_a, token_b)
+        require(!Map.member((t0.address, t1.address), state.pairs), "PAIR_EXISTS")
+
+        let fee_cfg = state.config.get_config(state.config_index)
+        require(!fee_cfg.disabled, "CONFIG_DISABLED")
+
+        if(fee_cfg.create_pool_fee > 0)
+            require(Call.value >= fee_cfg.create_pool_fee, "INSUFFICIENT_POOL_FEE")
+            Chain.spend(state.create_pool_fee_receiver, fee_cfg.create_pool_fee)
+
+        let (a0, a1) = if(token_a.address == t0.address) (amount_0, amount_1) else (amount_1, amount_0)
+
+        let pair : Pair = Chain.clone(
+            ref = state.pair_model,
+            state.config,
+            state.config_index,
+            t0, t1,
+            Call.caller,
+            open_time)
+
+        t0.transfer_allowance(Call.caller, Contract.address, a0)
+        t1.transfer_allowance(Call.caller, Contract.address, a1)
+        t0.transfer(pair.address, a0)
+        t1.transfer(pair.address, a1)
+
+        put(state { pairs[(t0.address, t1.address)] = pair,
+                    all_pairs = pair :: state.all_pairs })
+        Chain.event(PairCreated(t0, t1, pair, List.length(state.all_pairs)))
+        pair
+
+    function sort_tokens(a: IAEX9, b: IAEX9) : (IAEX9 * IAEX9) =
+        if(a.address < b.address) (a, b) else (b, a)
