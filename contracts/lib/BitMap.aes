@@ -1,0 +1,38 @@
+@compiler >= 8
+
+namespace BitMap =
+    function is_initialized(bitmap: int, bit_pos: int) : bool =
+        (bitmap band (1 bsl bit_pos)) != 0
+
+    function flip_bit(bitmap: int, bit_pos: int) : int =
+        bitmap bxor (1 bsl bit_pos)
+
+    function next_initialized_bit_lte(bitmap: int, bit_pos: int) : option(int) =
+        if(bit_pos < 0) None
+        else
+            let mask = (1 bsl (bit_pos + 1)) - 1
+            let masked = bitmap band mask
+            if(masked == 0) None
+            else Some(msb(masked))
+
+    function next_initialized_bit_gte(bitmap: int, bit_pos: int) : option(int) =
+        let mask = bnot((1 bsl bit_pos) - 1)
+        let masked = bitmap band mask
+        if(masked == 0) None
+        else Some(lsb(masked))
+
+    function msb(x: int) : int =
+        require(x > 0, "MSB_OF_ZERO")
+        msb_loop(x, 0)
+
+    private function msb_loop(x: int, bit: int) : int =
+        if(x =< 1) bit
+        else msb_loop(x bsr 1, bit + 1)
+
+    function lsb(x: int) : int =
+        require(x > 0, "LSB_OF_ZERO")
+        lsb_loop(x, 0)
+
+    private function lsb_loop(x: int, bit: int) : int =
+        if((x band 1) == 1) bit
+        else lsb_loop(x bsr 1, bit + 1)
