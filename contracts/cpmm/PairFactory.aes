@@ -95,8 +95,13 @@ main contract PairFactory =
 
         t0.transfer_allowance(Call.caller, Contract.address, a0)
         t1.transfer_allowance(Call.caller, Contract.address, a1)
-        t0.transfer(pair.address, a0)
-        t1.transfer(pair.address, a1)
+        t0.create_allowance(pair.address, a0)
+        t1.create_allowance(pair.address, a1)
+        pair.deposit(a0, a1, 0)
+        let lp_bal = pair.lp_balance(Contract.address)
+        switch(lp_bal)
+            Some(bal) => if(bal > 0) pair.transfer(Call.caller, bal)
+            None => ()
 
         let idx = state.pair_count
         put(state { pairs[(t0.address, t1.address)] = pair,
