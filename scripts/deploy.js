@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { readFileSync, existsSync } from 'fs';
-import { dirname, resolve, relative } from 'path';
+import { dirname, resolve } from 'path';
 import {
   AeSdk, Node, MemoryAccount, CompilerHttp, Contract,
 } from '@aeternity/aepp-sdk';
@@ -40,25 +40,38 @@ const STDLIB = new Set([
   'Set.aes', 'BLS12_381.aes', 'Frac.aes', 'AENSCompat.aes',
 ]);
 
-function buildFileSystem(entryPath, collected = {}, basePath = null) {
-  const absEntry = resolve(entryPath);
-  if (!basePath) basePath = dirname(absEntry);
-  const source = readFileSync(absEntry, 'utf-8');
-  const includeRegex = /^include\s+"(.+)"/gm;
-  let match;
-  while ((match = includeRegex.exec(source)) !== null) {
-    const includePath = match[1];
-    if (STDLIB.has(includePath)) continue;
-    const absInclude = resolve(dirname(absEntry), includePath);
-    const relKey = relative(basePath, absInclude);
-    if (collected[relKey]) continue;
-    if (!existsSync(absInclude)) {
-      throw new Error(`Include not found: ${includePath} (resolved to ${absInclude})`);
+function buildFileSystem(entryPath) {
+  const fileSystem = {};
+  const visited = new Set();
+
+  function processFile(absFilePath) {
+    if (visited.has(absFilePath)) return;
+    visited.add(absFilePath);
+
+    const source = readFileSync(absFilePath, 'utf-8');
+    const dir = dirname(absFilePath);
+    const includeRegex = /^include\s+"(.+)"/gm;
+    let match;
+
+    while ((match = includeRegex.exec(source)) !== null) {
+      const rawPath = match[1];
+      if (STDLIB.has(rawPath)) continue;
+
+      const absInclude = resolve(dir, rawPath);
+      if (!existsSync(absInclude)) {
+        throw new Error(`Include not found: ${rawPath} (from ${absFilePath})`);
+      }
+
+      if (!fileSystem[rawPath]) {
+        fileSystem[rawPath] = readFileSync(absInclude, 'utf-8');
+      }
+
+      processFile(absInclude);
     }
-    collected[relKey] = readFileSync(absInclude, 'utf-8');
-    buildFileSystem(absInclude, collected, basePath);
   }
-  return collected;
+
+  processFile(resolve(entryPath));
+  return fileSystem;
 }
 
 async function deployContract(aeSdk, sourcePath, args = []) {
