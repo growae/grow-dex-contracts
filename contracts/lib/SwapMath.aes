@@ -1,0 +1,26 @@
+@compiler >= 8
+
+include "./Math.aes"
+
+namespace SwapMath =
+    let FEE_RATE_DENOMINATOR : int = 1_000_000
+
+    function amount_out(amount_in: int, reserve_in: int, reserve_out: int) : int =
+        require(amount_in > 0, "SWAP_INSUFFICIENT_INPUT")
+        require(reserve_in > 0 && reserve_out > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
+        let numerator = amount_in * reserve_out
+        let denominator = reserve_in + amount_in
+        numerator / denominator
+
+    function amount_in(amount_out: int, reserve_in: int, reserve_out: int) : int =
+        require(amount_out > 0, "SWAP_INSUFFICIENT_OUTPUT")
+        require(reserve_in > 0 && reserve_out > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
+        require(amount_out < reserve_out, "SWAP_EXCEEDS_RESERVES")
+        let numerator = reserve_in * amount_out
+        let denominator = reserve_out - amount_out
+        numerator / denominator + 1
+
+    function quote(amount_a: int, reserve_a: int, reserve_b: int) : int =
+        require(amount_a > 0, "SWAP_INSUFFICIENT_AMOUNT")
+        require(reserve_a > 0 && reserve_b > 0, "SWAP_INSUFFICIENT_LIQUIDITY")
+        amount_a * reserve_b / reserve_a
