@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "This is the default package.json generated for your project",
   "scripts": {
-    "test": "mocha ./test/**/*.js --timeout 0 --exit"
+    "test": "mocha './test/**/*.js' --timeout 0 --exit"
   },
   "type": "module",
   "dependencies": {

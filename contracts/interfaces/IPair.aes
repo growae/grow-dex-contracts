@@ -5,6 +5,7 @@ include "./IDexConfig.aes"
 
 contract interface IPair =
     record reserves = { reserve0: int, reserve1: int, block_timestamp_last: int }
+    entrypoint init : (IDexConfig, int, IAEX9, IAEX9, address, int) => unit
     entrypoint token_0 : () => IAEX9
     entrypoint token_1 : () => IAEX9
     entrypoint get_reserves : () => reserves

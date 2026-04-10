@@ -2,7 +2,7 @@ import { utils } from "@aeternity/aeproject";
 import { assert } from "chai";
 import { before, describe, it } from "mocha";
 import { deploySophiaContract, deployToken } from "./shared/fixtures.js";
-import { expectRevert } from "./shared/utils.js";
+import { expectRevert, contractToAccount } from "./shared/utils.js";
 
 const INITIAL_SUPPLY = 10n ** 24n;
 const STAKE_AMOUNT = 10n ** 18n;
@@ -126,13 +126,13 @@ describe("Farm", () => {
     let balBefore;
 
     before(async () => {
-      balBefore = (await rewardToken.balance(farm.$options.address)).decodedResult ?? 0n;
-      await rewardToken.create_allowance(farm.$options.address, FUND_AMOUNT);
-      fundResult = await farm.fund_farm(farmId, FUND_AMOUNT);
+      balBefore = (await rewardToken.balance(contractToAccount(farm.$options.address))).decodedResult ?? 0n;
+      await rewardToken.create_allowance(contractToAccount(farm.$options.address), FUND_AMOUNT);
+      fundResult = await farm.fund_farm(farmId, FUND_AMOUNT, { omitUnknown: true });
     });
 
     it("transfers reward tokens to farm", async () => {
-      const balAfter = (await rewardToken.balance(farm.$options.address)).decodedResult;
+      const balAfter = (await rewardToken.balance(contractToAccount(farm.$options.address))).decodedResult;
       assert.equal(balAfter - balBefore, FUND_AMOUNT);
     });
 
@@ -154,8 +154,8 @@ describe("Farm", () => {
     let depositResult;
 
     before(async () => {
-      await lpToken.create_allowance(farm.$options.address, STAKE_AMOUNT, { onAccount: user1 });
-      depositResult = await farm.deposit(farmId, STAKE_AMOUNT, { onAccount: user1 });
+      await lpToken.create_allowance(contractToAccount(farm.$options.address), STAKE_AMOUNT, { onAccount: user1 });
+      depositResult = await farm.deposit(farmId, STAKE_AMOUNT, { onAccount: user1, omitUnknown: true });
     });
 
     it("updates user staked amount", async () => {
@@ -210,7 +210,7 @@ describe("Farm", () => {
 
     before(async () => {
       rewardBalBefore = (await rewardToken.balance(user1.address)).decodedResult ?? 0n;
-      claimResult = await farm.claim(farmId, { onAccount: user1 });
+      claimResult = await farm.claim(farmId, { onAccount: user1, omitUnknown: true });
     });
 
     it("transfers reward tokens to user", async () => {
@@ -247,7 +247,7 @@ describe("Farm", () => {
     before(async () => {
       lpBalBefore = (await lpToken.balance(user1.address)).decodedResult;
       rewardBalBefore = (await rewardToken.balance(user1.address)).decodedResult ?? 0n;
-      withdrawResult = await farm.withdraw(farmId, withdrawAmount, { onAccount: user1 });
+      withdrawResult = await farm.withdraw(farmId, withdrawAmount, { onAccount: user1, omitUnknown: true });
     });
 
     it("returns LP tokens to user", async () => {
@@ -299,14 +299,14 @@ describe("Farm", () => {
     before(async () => {
       const ui = (await farm.get_user_info(farmId, user1.address)).decodedResult;
       if (ui.staked_amount > 0n) {
-        await farm.withdraw(farmId, ui.staked_amount, { onAccount: user1 });
+        await farm.withdraw(farmId, ui.staked_amount, { onAccount: user1, omitUnknown: true });
       }
 
-      await lpToken.create_allowance(farm.$options.address, STAKE_AMOUNT, { onAccount: user1 });
-      await farm.deposit(farmId, STAKE_AMOUNT, { onAccount: user1 });
+      await lpToken.create_allowance(contractToAccount(farm.$options.address), STAKE_AMOUNT, { onAccount: user1 });
+      await farm.deposit(farmId, STAKE_AMOUNT, { onAccount: user1, omitUnknown: true });
 
-      await lpToken.create_allowance(farm.$options.address, STAKE_AMOUNT, { onAccount: user2 });
-      await farm.deposit(farmId, STAKE_AMOUNT, { onAccount: user2 });
+      await lpToken.create_allowance(contractToAccount(farm.$options.address), STAKE_AMOUNT, { onAccount: user2 });
+      await farm.deposit(farmId, STAKE_AMOUNT, { onAccount: user2, omitUnknown: true });
     });
 
     it("total_staked reflects both deposits", async () => {

@@ -2,42 +2,58 @@
 
 include "../interfaces/IAEX9.aes"
 include "../interfaces/IDexConfig.aes"
-include "./Pool.aes"
+include "../interfaces/IPool.aes"
 
 main contract PoolFactory =
     record state = {
         admin       : address,
         config      : IDexConfig,
-        pool_model  : Pool,
-        pools       : map(address * address * int, Pool),
-        all_pools   : list(Pool)
+        pool_model  : IPool,
+        pools       : map(address * address * int, IPool),
+        all_pools   : map(int, IPool),
+        pool_count  : int
         }
 
     datatype event
-        = PoolCreated(IAEX9, IAEX9, Pool, int)
+        = PoolCreated(IAEX9, IAEX9, int)
 
-    entrypoint init(config: IDexConfig, pool_model: Pool) = {
+    // Sets up CLMM factory with DexConfig and a Pool template for cloning
+    entrypoint init(config: IDexConfig, pool_model: IPool) = {
         admin = Call.caller,
         config = config,
         pool_model = pool_model,
         pools = {},
-        all_pools = []
+        all_pools = {},
+        pool_count = 0
         }
 
-    entrypoint get_pool(token_a: IAEX9, token_b: IAEX9, config_index: int) : option(Pool) =
+    // Looks up a CLMM pool by token pair and fee tier index
+    entrypoint get_pool(token_a: IAEX9, token_b: IAEX9, config_index: int) : option(IPool) =
         let (t0, t1) = sort_tokens(token_a, token_b)
         Map.lookup((t0.address, t1.address, config_index), state.pools)
 
-    entrypoint all_pools() : list(Pool) = state.all_pools
-    entrypoint all_pools_length() : int = List.length(state.all_pools)
+    entrypoint pool_count() : int = state.pool_count
 
+    // O(1) lookup by index
+    entrypoint get_pool_at(index: int) : IPool =
+        require(index >= 0 && index < state.pool_count, "INDEX_OUT_OF_BOUNDS")
+        state.all_pools[index]
+
+    // Bounded paginated retrieval — returns up to `limit` pools starting at `offset`
+    entrypoint get_pools(offset: int, limit: int) : list(IPool) =
+        require(offset >= 0, "NEGATIVE_OFFSET")
+        require(limit > 0, "ZERO_LIMIT")
+        let end = min(offset + limit, state.pool_count)
+        collect_range(end - 1, offset, [])
+
+    // Deploys a new CLMM pool via Chain.clone with initial sqrt price and tick spacing
     payable stateful entrypoint create_pool(
             token_a: IAEX9,
             token_b: IAEX9,
             config_index: int,
             initial_sqrt_price: int,
             open_time: int
-        ) : Pool =
+        ) : IPool =
         require(token_a.address != token_b.address, "IDENTICAL_TOKENS")
         let (t0, t1) = sort_tokens(token_a, token_b)
         require(!Map.member((t0.address, t1.address, config_index), state.pools), "POOL_EXISTS")
@@ -52,7 +68,7 @@ main contract PoolFactory =
             let refund = Call.value - fee_cfg.create_pool_fee
             if(refund > 0) Chain.spend(Call.caller, refund)
 
-        let pool : Pool = Chain.clone(
+        let pool : IPool = Chain.clone(
             ref = state.pool_model,
             state.config,
             config_index,
@@ -62,10 +78,21 @@ main contract PoolFactory =
             Call.caller,
             open_time)
 
+        let idx = state.pool_count
         put(state { pools[(t0.address, t1.address, config_index)] = pool,
-                    all_pools = pool :: state.all_pools })
-        Chain.event(PoolCreated(t0, t1, pool, fee_cfg.tick_spacing))
+                    all_pools[idx] = pool,
+                    pool_count = idx + 1 })
+        Chain.event(PoolCreated(t0, t1, fee_cfg.tick_spacing))
         pool
 
+    // Canonical ordering: lower address first
     function sort_tokens(a: IAEX9, b: IAEX9) : (IAEX9 * IAEX9) =
         if(a.address < b.address) (a, b) else (b, a)
+
+    function min(a: int, b: int) : int =
+        if(a < b) a else b
+
+    // Iterates backwards from end-1 to offset, prepending to build forward-ordered result
+    private function collect_range(j: int, stop: int, acc: list(IPool)) : list(IPool) =
+        if(j < stop) acc
+        else collect_range(j - 1, stop, state.all_pools[j] :: acc)

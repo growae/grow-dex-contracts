@@ -4,7 +4,7 @@ import { assert } from "chai";
 import chaiAsPromised from "chai-as-promised";
 import { before, describe, it } from "mocha";
 import { deploySophiaContract, deployToken, deployDexConfig } from "./shared/fixtures.js";
-import { expectRevert, Q64 } from "./shared/utils.js";
+import { expectRevert, Q64, contractToAccount } from "./shared/utils.js";
 
 chai.use(chaiAsPromised);
 
@@ -61,8 +61,8 @@ describe("Pool", () => {
       0,
     ]);
 
-    await token0.create_allowance(pool.$options.address, INITIAL_SUPPLY);
-    await token1.create_allowance(pool.$options.address, INITIAL_SUPPLY);
+    await token0.create_allowance(contractToAccount(pool.$options.address), INITIAL_SUPPLY);
+    await token1.create_allowance(contractToAccount(pool.$options.address), INITIAL_SUPPLY);
   });
 
   describe("initialization", () => {
@@ -108,7 +108,7 @@ describe("Pool", () => {
     before(async () => {
       balBefore0 = (await token0.balance(admin.address)).decodedResult;
       balBefore1 = (await token1.balance(admin.address)).decodedResult;
-      openResult = await pool.open_position(-100, 100, LIQ, MAX_AMOUNT, MAX_AMOUNT);
+      openResult = await pool.open_position(-100, 100, LIQ, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       posId = openResult.decodedResult;
     });
 
@@ -135,8 +135,8 @@ describe("Pool", () => {
       assert.isTrue(balAfter0 < balBefore0);
       assert.isTrue(balAfter1 < balBefore1);
 
-      const poolBal0 = (await token0.balance(pool.$options.address)).decodedResult;
-      const poolBal1 = (await token1.balance(pool.$options.address)).decodedResult;
+      const poolBal0 = (await token0.balance(contractToAccount(pool.$options.address))).decodedResult;
+      const poolBal1 = (await token1.balance(contractToAccount(pool.$options.address))).decodedResult;
       assert.isTrue(poolBal0 > 0n);
       assert.isTrue(poolBal1 > 0n);
     });
@@ -181,7 +181,7 @@ describe("Pool", () => {
     let increaseResult;
 
     before(async () => {
-      increaseResult = await pool.increase_liquidity(0, LIQ, MAX_AMOUNT, MAX_AMOUNT);
+      increaseResult = await pool.increase_liquidity(0, LIQ, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
     });
 
     it("doubles position liquidity", async () => {
@@ -212,7 +212,7 @@ describe("Pool", () => {
 
     before(async () => {
       priceBefore = (await pool.sqrt_price_x64()).decodedResult;
-      swapResult = await pool.swap(true, SWAP_AMOUNT, MIN_SQRT_PRICE);
+      swapResult = await pool.swap(true, SWAP_AMOUNT, MIN_SQRT_PRICE, { omitUnknown: true });
     });
 
     it("moves price down", async () => {
@@ -248,7 +248,7 @@ describe("Pool", () => {
 
     before(async () => {
       priceBefore = (await pool.sqrt_price_x64()).decodedResult;
-      swapResult = await pool.swap(false, SWAP_AMOUNT, MAX_SQRT_PRICE);
+      swapResult = await pool.swap(false, SWAP_AMOUNT, MAX_SQRT_PRICE, { omitUnknown: true });
     });
 
     it("moves price up", async () => {
@@ -295,13 +295,13 @@ describe("Pool", () => {
 
   describe("collect_fees", () => {
     it("collects accrued trading fees for position", async () => {
-      const result = await pool.collect_fees(0, MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.collect_fees(0, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       const [f0, f1] = result.decodedResult;
       assert.isTrue(f0 > 0n || f1 > 0n);
     });
 
     it("emits CollectFee event", async () => {
-      const result = await pool.collect_fees(0, MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.collect_fees(0, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       const events = result.decodedEvents.filter(e => e.name === "CollectFee");
       assert.lengthOf(events, 1);
     });
@@ -309,7 +309,7 @@ describe("Pool", () => {
 
   describe("collect_protocol_fee", () => {
     it("protocol owner can collect accumulated fees", async () => {
-      const result = await pool.collect_protocol_fee(MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.collect_protocol_fee(MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       const events = result.decodedEvents.filter(e => e.name === "CollectProtocolFee");
       assert.lengthOf(events, 1);
     });
@@ -317,7 +317,7 @@ describe("Pool", () => {
 
   describe("collect_fund_fee", () => {
     it("fund owner can collect accumulated fees", async () => {
-      const result = await pool.collect_fund_fee(MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.collect_fund_fee(MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       const events = result.decodedEvents.filter(e => e.name === "CollectFundFee");
       assert.lengthOf(events, 1);
     });
@@ -327,7 +327,7 @@ describe("Pool", () => {
     let decreaseResult;
 
     before(async () => {
-      decreaseResult = await pool.decrease_liquidity(0, LIQ, 0, 0);
+      decreaseResult = await pool.decrease_liquidity(0, LIQ, 0, 0, { omitUnknown: true });
     });
 
     it("decreases position liquidity by delta", async () => {
@@ -355,7 +355,7 @@ describe("Pool", () => {
     let secondPosId;
 
     before(async () => {
-      const result = await pool.open_position(-200, 200, LIQ / 2n, MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.open_position(-200, 200, LIQ / 2n, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       secondPosId = Number(result.decodedResult);
     });
 
@@ -367,7 +367,7 @@ describe("Pool", () => {
     });
 
     it("owner can close and position is deleted", async () => {
-      const result = await pool.close_position(secondPosId);
+      const result = await pool.close_position(secondPosId, { omitUnknown: true });
       const events = result.decodedEvents.filter(e => e.name === "PositionClosed");
       assert.lengthOf(events, 1);
 
@@ -412,7 +412,7 @@ describe("Pool", () => {
 
   describe("multiple positions at different ranges", () => {
     it("can open position above current price (token0 only)", async () => {
-      const result = await pool.open_position(100, 200, LIQ / 2n, MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.open_position(100, 200, LIQ / 2n, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       const newPosId = Number(result.decodedResult);
       const pos = (await pool.get_position(newPosId)).decodedResult;
       assert.equal(pos.tick_lower, 100n);
@@ -421,7 +421,7 @@ describe("Pool", () => {
     });
 
     it("can open position below current price (token1 only)", async () => {
-      const result = await pool.open_position(-200, -100, LIQ / 2n, MAX_AMOUNT, MAX_AMOUNT);
+      const result = await pool.open_position(-200, -100, LIQ / 2n, MAX_AMOUNT, MAX_AMOUNT, { omitUnknown: true });
       const newPosId = Number(result.decodedResult);
       const pos = (await pool.get_position(newPosId)).decodedResult;
       assert.equal(pos.tick_lower, -200n);
@@ -429,7 +429,7 @@ describe("Pool", () => {
     });
 
     it("swap still works with multiple positions providing liquidity", async () => {
-      const result = await pool.swap(true, SWAP_AMOUNT / 2n, MIN_SQRT_PRICE);
+      const result = await pool.swap(true, SWAP_AMOUNT / 2n, MIN_SQRT_PRICE, { omitUnknown: true });
       const [a0, a1] = result.decodedResult;
       assert.isTrue(a0 > 0n);
       assert.isTrue(a1 > 0n);
