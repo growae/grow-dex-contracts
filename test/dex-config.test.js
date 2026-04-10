@@ -46,21 +46,21 @@ describe("DexConfig", () => {
   describe("create_amm_config", () => {
     it("creates a config with valid params", async () => {
       const result = await config.create_amm_config(
-        3000,  // trade_fee_rate
-        200000, // protocol_fee_rate
-        100000, // fund_fee_rate
-        1000,  // creator_fee_rate
-        0,     // create_pool_fee
-        60     // tick_spacing
+        2500,   // trade_fee_rate (0.25%)
+        120000, // protocol_fee_rate (12% of trade fee)
+        40000,  // fund_fee_rate (4% of trade fee)
+        500,    // creator_fee_rate (0.05%)
+        0,      // create_pool_fee
+        60      // tick_spacing
       );
       assert.equal(result.decodedResult, 0n);
 
       const cfg = await config.get_config(0);
       assert.equal(cfg.decodedResult.index, 0n);
-      assert.equal(cfg.decodedResult.trade_fee_rate, 3000n);
-      assert.equal(cfg.decodedResult.protocol_fee_rate, 200000n);
-      assert.equal(cfg.decodedResult.fund_fee_rate, 100000n);
-      assert.equal(cfg.decodedResult.creator_fee_rate, 1000n);
+      assert.equal(cfg.decodedResult.trade_fee_rate, 2500n);
+      assert.equal(cfg.decodedResult.protocol_fee_rate, 120000n);
+      assert.equal(cfg.decodedResult.fund_fee_rate, 40000n);
+      assert.equal(cfg.decodedResult.creator_fee_rate, 500n);
       assert.equal(cfg.decodedResult.create_pool_fee, 0n);
       assert.equal(cfg.decodedResult.tick_spacing, 60n);
       assert.equal(cfg.decodedResult.disabled, false);
@@ -115,7 +115,7 @@ describe("DexConfig", () => {
 
     it("reverts when called by non-admin", async () => {
       await expectRevert(
-        config.create_amm_config(3000, 200000, 100000, 1000, 0, 60, {
+        config.create_amm_config(2500, 120000, 40000, 500, 0, 60, {
           onAccount: otherAccount,
         }),
         "UNAUTHORIZED"
@@ -128,7 +128,7 @@ describe("DexConfig", () => {
 
     before(async () => {
       const result = await config.create_amm_config(
-        3000, 200000, 100000, 1000, 0, 60
+        2500, 120000, 40000, 500, 0, 60
       );
       cfgIndex = Number(result.decodedResult);
     });
@@ -312,7 +312,7 @@ describe("DexConfig", () => {
       await freshConfig.set_admin(otherAccount.address);
 
       const result = await freshConfig.create_amm_config(
-        3000, 200000, 100000, 1000, 0, 60,
+        2500, 120000, 40000, 500, 0, 60,
         { onAccount: otherAccount }
       );
       assert.equal(result.decodedResult, 0n);

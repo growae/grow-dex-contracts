@@ -12,10 +12,10 @@ import {
 
 chai.use(chaiAsPromised);
 
-const TRADE_FEE_RATE = 3000n;
-const PROTOCOL_FEE_RATE = 200000n;
-const FUND_FEE_RATE = 100000n;
-const CREATOR_FEE_RATE = 1000n;
+const TRADE_FEE_RATE = 2500n;
+const PROTOCOL_FEE_RATE = 120000n;
+const FUND_FEE_RATE = 40000n;
+const CREATOR_FEE_RATE = 500n;
 
 const DEPOSIT_AMOUNT = 10n ** 15n;
 const SWAP_AMOUNT = 10n ** 12n;

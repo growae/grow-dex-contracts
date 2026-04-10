@@ -8,10 +8,10 @@ import { expectRevert, INITIAL_SUPPLY, contractToAccount } from "./shared/utils.
 
 chai.use(chaiAsPromised);
 
-const TRADE_FEE_RATE = 3000;
-const PROTOCOL_FEE_RATE = 200000;
-const FUND_FEE_RATE = 100000;
-const CREATOR_FEE_RATE = 1000;
+const TRADE_FEE_RATE = 2500;
+const PROTOCOL_FEE_RATE = 120000;
+const FUND_FEE_RATE = 40000;
+const CREATOR_FEE_RATE = 500;
 const SEED_AMOUNT = 10n ** 12n;
 
 describe("PairFactory", () => {
