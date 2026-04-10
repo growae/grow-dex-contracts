@@ -1,13 +1,22 @@
+// CLMM (Concentrated Liquidity Market Maker) pool contract interface
+// Supports ranged positions, tick-based swaps, and per-position fee accrual
 @compiler >= 8
 
 include "./IAEX9.aes"
 include "./IDexConfig.aes"
 
 contract interface IPool =
+    // Initializes the pool (config, tier_index, token0, token1, tick_spacing, initial_sqrt_price, creator, open_time)
     entrypoint init : (IDexConfig, int, IAEX9, IAEX9, int, int, address, int) => unit
+    // Returns the first token in the canonical pair ordering
     entrypoint token_0 : () => IAEX9
+    // Returns the second token in the canonical pair ordering
     entrypoint token_1 : () => IAEX9
+    // Current square-root price encoded in Q64.64 fixed-point
     entrypoint sqrt_price_x64 : () => int
+    // The tick index corresponding to the current price
     entrypoint tick_current : () => int
+    // Total active liquidity within the current tick range
     entrypoint liquidity : () => int
+    // Pool status bitmask (bit 0 = deposit, bit 1 = withdraw, bit 2 = swap; 1 = disabled)
     entrypoint get_status : () => int

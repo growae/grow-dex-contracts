@@ -1,3 +1,7 @@
+// CPMM Pair Factory
+// Deploys new Pair contracts via Chain.clone and maintains a paginated,
+// gas-safe registry of all created pairs.
+// Charges an optional AE creation fee and seeds initial token balances.
 @compiler >= 8
 
 include "../interfaces/IAEX9.aes"
@@ -6,18 +10,18 @@ include "../interfaces/IPair.aes"
 
 main contract PairFactory =
     record state = {
-        admin        : address,
-        config       : IDexConfig,
-        config_index : int,
-        pair_model   : IPair,
-        pairs        : map(address * address, IPair),
-        all_pairs    : map(int, IPair),
-        pair_count   : int,
-        create_pool_fee_receiver : address
+        admin        : address,                        // Deployer / admin address
+        config       : IDexConfig,                     // Central fee configuration contract
+        config_index : int,                            // Default fee tier index for new pairs
+        pair_model   : IPair,                          // Template contract cloned for each new pair
+        pairs        : map(address * address, IPair),  // Canonical (token0, token1) → Pair lookup
+        all_pairs    : map(int, IPair),                // Sequential index → Pair (for pagination)
+        pair_count   : int,                            // Total pairs created
+        create_pool_fee_receiver : address             // Recipient of one-time pool creation fees
         }
 
     datatype event
-        = PairCreated(IAEX9, IAEX9, int)
+        = PairCreated(IAEX9, IAEX9, int)  // Emitted on pair creation (token0, token1, pair_number)
 
     // Sets up factory with DexConfig, fee tier index, and a Pair template for cloning
     entrypoint init(
@@ -41,6 +45,7 @@ main contract PairFactory =
         let (t0, t1) = sort_tokens(token_a, token_b)
         Map.lookup((t0.address, t1.address), state.pairs)
 
+    // Total number of pairs deployed through this factory
     entrypoint pair_count() : int = state.pair_count
 
     // O(1) lookup by index

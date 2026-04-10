@@ -1,3 +1,7 @@
+// CLMM Pool Factory
+// Deploys new concentrated-liquidity Pool contracts via Chain.clone and
+// maintains a paginated, gas-safe registry of all created pools.
+// Each pool is uniquely identified by (token0, token1, config_index).
 @compiler >= 8
 
 include "../interfaces/IAEX9.aes"
@@ -6,16 +10,16 @@ include "../interfaces/IPool.aes"
 
 main contract PoolFactory =
     record state = {
-        admin       : address,
-        config      : IDexConfig,
-        pool_model  : IPool,
-        pools       : map(address * address * int, IPool),
-        all_pools   : map(int, IPool),
-        pool_count  : int
+        admin       : address,                             // Deployer / admin address
+        config      : IDexConfig,                          // Central fee configuration contract
+        pool_model  : IPool,                               // Template contract cloned for each new pool
+        pools       : map(address * address * int, IPool), // (token0, token1, config_index) → Pool
+        all_pools   : map(int, IPool),                     // Sequential index → Pool (for pagination)
+        pool_count  : int                                  // Total pools created
         }
 
     datatype event
-        = PoolCreated(IAEX9, IAEX9, int)
+        = PoolCreated(IAEX9, IAEX9, int)  // Emitted on pool creation (token0, token1, tick_spacing)
 
     // Sets up CLMM factory with DexConfig and a Pool template for cloning
     entrypoint init(config: IDexConfig, pool_model: IPool) = {
@@ -32,6 +36,7 @@ main contract PoolFactory =
         let (t0, t1) = sort_tokens(token_a, token_b)
         Map.lookup((t0.address, t1.address, config_index), state.pools)
 
+    // Total number of pools deployed through this factory
     entrypoint pool_count() : int = state.pool_count
 
     // O(1) lookup by index

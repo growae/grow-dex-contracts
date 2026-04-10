@@ -1,3 +1,5 @@
+// CPMM swap router interface
+// Routes exact-input swaps through multi-hop paths and exact-output swaps through single pairs
 @compiler >= 8
 
 include "./IAEX9.aes"
@@ -6,5 +8,7 @@ include "./IWAE.aes"
 include "./IDexConfig.aes"
 
 contract interface IRouter =
+    // Multi-hop exact-input swap (input_token, amount_in, min_amount_out, path, deadline)
     stateful entrypoint swap_base_input : (IAEX9, int, int, list(IAEX9), int) => int
+    // Single-pair exact-output swap (input_token, max_amount_in, amount_out, path, deadline)
     stateful entrypoint swap_base_output : (IAEX9, int, int, list(IAEX9), int) => int
