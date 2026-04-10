@@ -187,11 +187,14 @@ main contract Pair =
     // ── Core pool operations ──
 
     // Adds liquidity proportional to reserves; first deposit bootstraps with geometric mean
-    stateful entrypoint deposit(amount0: int, amount1: int) : int =
+    stateful entrypoint deposit(amount0: int, amount1: int, minimum_lp: int) : int =
         require_unlocked()
         set_lock(true)
         require(is_enabled(0), "DEPOSIT_DISABLED")
         require(amount0 > 0 && amount1 > 0, "ZERO_DEPOSIT")
+
+        let r0 = state.reserve0
+        let r1 = state.reserve1
 
         state.token0.transfer_allowance(Call.caller, Contract.address, amount0)
         state.token1.transfer_allowance(Call.caller, Contract.address, amount1)
@@ -203,11 +206,11 @@ main contract Pair =
                 mint_lp(Contract.address, minimum_liquidity)
                 lp
             else
-                let (er0, er1) = effective_reserves()
-                Math.min(amount0 * state.total_supply / er0,
-                         amount1 * state.total_supply / er1)
+                Math.min(amount0 * state.total_supply / r0,
+                         amount1 * state.total_supply / r1)
 
         require(lp_amount > 0, "INSUFFICIENT_LIQUIDITY_MINTED")
+        require(lp_amount >= minimum_lp, "SLIPPAGE_EXCEEDED")
         mint_lp(Call.caller, lp_amount)
         update_reserves_and_oracle()
         Chain.event(Deposit(Call.caller, amount0, amount1))
