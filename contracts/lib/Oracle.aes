@@ -8,7 +8,7 @@ namespace Oracle =
         block_timestamp    : int,
         cumulative_price_0 : int,
         cumulative_price_1 : int
-    }
+        }
 
     function default_observation() : observation =
         { block_timestamp = 0, cumulative_price_0 = 0, cumulative_price_1 = 0 }
@@ -29,7 +29,7 @@ namespace Oracle =
                 block_timestamp = current_timestamp,
                 cumulative_price_0 = new_cumulative_0,
                 cumulative_price_1 = new_cumulative_1
-            }
+                }
             let advance = time_delta >= observation_update_duration
             (updated, advance)
 

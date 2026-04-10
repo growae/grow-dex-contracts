@@ -35,7 +35,7 @@ main contract DexConfig =
         fund_owner = Call.caller,
         configs = {},
         next_index = 0
-    }
+        }
 
     entrypoint admin() : address = state.admin
     entrypoint protocol_owner() : address = state.protocol_owner
@@ -70,7 +70,7 @@ main contract DexConfig =
             create_pool_fee = create_pool_fee,
             tick_spacing = tick_spacing,
             disabled = false
-        }
+            }
         put(state { configs[idx] = cfg, next_index = idx + 1 })
         Chain.event(ConfigCreated(idx, trade_fee_rate, tick_spacing))
         idx

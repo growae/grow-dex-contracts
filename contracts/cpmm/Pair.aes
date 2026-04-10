@@ -95,7 +95,7 @@ main contract Pair =
         status = 0,
         open_time = open_time,
         locked = false
-    }
+        }
 
     // ── Read-only entrypoints ──
 

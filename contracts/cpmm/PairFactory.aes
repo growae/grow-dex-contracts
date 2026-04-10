@@ -31,7 +31,7 @@ main contract PairFactory =
         pairs = {},
         all_pairs = [],
         create_pool_fee_receiver = fee_receiver
-    }
+        }
 
     entrypoint get_pair(token_a: IAEX9, token_b: IAEX9) : option(Pair) =
         let (t0, t1) = sort_tokens(token_a, token_b)

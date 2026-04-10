@@ -42,7 +42,7 @@ main contract Farm =
         farms = {},
         user_stakes = {},
         next_farm_id = 0
-    }
+        }
 
     entrypoint admin() : address = state.admin
     entrypoint get_farm(farm_id: int) : farm_pool =
@@ -87,7 +87,7 @@ main contract Farm =
             last_update_time = start_time,
             acc_reward_per_share = 0,
             total_staked = 0
-        }
+            }
         put(state { farms[farm_id] = farm, next_farm_id = farm_id + 1 })
         Chain.event(FarmCreated(farm_id, lp_token, reward_token, reward_per_second))
         farm_id

@@ -22,7 +22,7 @@ main contract PoolFactory =
         pool_model = pool_model,
         pools = {},
         all_pools = []
-    }
+        }
 
     entrypoint get_pool(token_a: IAEX9, token_b: IAEX9, config_index: int) : option(Pool) =
         let (t0, t1) = sort_tokens(token_a, token_b)
