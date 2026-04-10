@@ -1,0 +1,626 @@
+@compiler >= 8
+
+include "String.aes"
+include "Option.aes"
+include "List.aes"
+include "../interfaces/IAEX9.aes"
+include "../interfaces/IDexConfig.aes"
+include "../lib/Math.aes"
+include "../lib/FeeMath.aes"
+include "../lib/TickMath.aes"
+include "../lib/LiquidityMath.aes"
+include "../lib/BitMap.aes"
+
+main contract Pool =
+    let Q64 : int = 18446744073709551616
+    let MAX_TICKS_PER_SWAP : int = 20
+
+    record tick_state = {
+        liquidity_net        : int,
+        liquidity_gross      : int,
+        fee_growth_outside_0 : int,
+        fee_growth_outside_1 : int,
+        initialized          : bool
+    }
+
+    record position = {
+        owner                      : address,
+        tick_lower                 : int,
+        tick_upper                 : int,
+        liquidity                  : int,
+        fee_growth_inside_last_0   : int,
+        fee_growth_inside_last_1   : int,
+        tokens_owed_0              : int,
+        tokens_owed_1              : int
+    }
+
+    record state = {
+        config           : IDexConfig,
+        config_index     : int,
+        creator          : address,
+        token0           : IAEX9,
+        token1           : IAEX9,
+        tick_spacing     : int,
+        sqrt_price_x64   : int,
+        tick_current     : int,
+        liquidity        : int,
+        fee_growth_global_0 : int,
+        fee_growth_global_1 : int,
+        protocol_fees_0  : int,
+        protocol_fees_1  : int,
+        fund_fees_0      : int,
+        fund_fees_1      : int,
+        ticks            : map(int, tick_state),
+        tick_bitmap      : int,
+        positions        : map(int, position),
+        next_position_id : int,
+        status           : int,
+        open_time        : int
+    }
+
+    datatype event
+        = PositionOpened(address, int, int, int, int, int, int)
+        | PositionClosed(address, int)
+        | IncreaseLiquidity(int, int, int, int)
+        | DecreaseLiquidity(int, int, int, int)
+        | Swap(address, int, int, int, int, int)
+        | CollectFee(int, int, int)
+        | CollectProtocolFee(address, int, int)
+        | CollectFundFee(address, int, int)
+        | UpdatePoolStatus(int, int)
+
+    entrypoint init(
+            config: IDexConfig,
+            config_index: int,
+            token0: IAEX9,
+            token1: IAEX9,
+            tick_spacing: int,
+            sqrt_price_x64: int,
+            creator: address,
+            open_time: int
+        ) = {
+        config = config,
+        config_index = config_index,
+        creator = creator,
+        token0 = token0,
+        token1 = token1,
+        tick_spacing = tick_spacing,
+        sqrt_price_x64 = sqrt_price_x64,
+        tick_current = TickMath.get_tick_at_sqrt_price(sqrt_price_x64),
+        liquidity = 0,
+        fee_growth_global_0 = 0,
+        fee_growth_global_1 = 0,
+        protocol_fees_0 = 0,
+        protocol_fees_1 = 0,
+        fund_fees_0 = 0,
+        fund_fees_1 = 0,
+        ticks = {},
+        tick_bitmap = 0,
+        positions = {},
+        next_position_id = 0,
+        status = 0,
+        open_time = open_time
+    }
+
+    // --- Read entrypoints ---
+
+    entrypoint token_0() : IAEX9 = state.token0
+    entrypoint token_1() : IAEX9 = state.token1
+    entrypoint sqrt_price_x64() : int = state.sqrt_price_x64
+    entrypoint tick_current() : int = state.tick_current
+    entrypoint liquidity() : int = state.liquidity
+    entrypoint fee_growth_global_0() : int = state.fee_growth_global_0
+    entrypoint fee_growth_global_1() : int = state.fee_growth_global_1
+    entrypoint get_tick(tick_index: int) : tick_state =
+        Map.lookup_default(tick_index, state.ticks, default_tick())
+    entrypoint get_position(position_id: int) : position =
+        require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
+        state.positions[position_id]
+    entrypoint get_status() : int = state.status
+
+    // --- Position management ---
+
+    stateful entrypoint open_position(
+            tick_lower: int,
+            tick_upper: int,
+            liquidity_desired: int,
+            amount_0_max: int,
+            amount_1_max: int
+        ) : int =
+        require(is_enabled(0), "POSITION_DISABLED")
+        require(tick_lower < tick_upper, "INVALID_TICK_RANGE")
+        require(tick_lower >= TickMath.min_tick, "TICK_LOWER_OOB")
+        require(tick_upper =< TickMath.max_tick, "TICK_UPPER_OOB")
+        require(tick_lower mod state.tick_spacing == 0, "TICK_LOWER_NOT_ALIGNED")
+        require(tick_upper mod state.tick_spacing == 0, "TICK_UPPER_NOT_ALIGNED")
+        require(liquidity_desired > 0, "ZERO_LIQUIDITY")
+
+        let sqrt_lower = TickMath.get_sqrt_price_at_tick(tick_lower)
+        let sqrt_upper = TickMath.get_sqrt_price_at_tick(tick_upper)
+
+        let amount_0 = LiquidityMath.get_delta_amount_0(state.sqrt_price_x64, sqrt_upper, liquidity_desired, true)
+        let amount_1 = LiquidityMath.get_delta_amount_1(sqrt_lower, state.sqrt_price_x64, liquidity_desired, true)
+
+        let (a0, a1) =
+            if(state.tick_current < tick_lower)
+                let a0 = LiquidityMath.get_delta_amount_0(sqrt_lower, sqrt_upper, liquidity_desired, true)
+                (a0, 0)
+            elif(state.tick_current >= tick_upper)
+                let a1 = LiquidityMath.get_delta_amount_1(sqrt_lower, sqrt_upper, liquidity_desired, true)
+                (0, a1)
+            else
+                (amount_0, amount_1)
+
+        require(a0 =< amount_0_max, "AMOUNT_0_EXCEEDED")
+        require(a1 =< amount_1_max, "AMOUNT_1_EXCEEDED")
+
+        if(a0 > 0) state.token0.transfer_allowance(Call.caller, Contract.address, a0)
+        if(a1 > 0) state.token1.transfer_allowance(Call.caller, Contract.address, a1)
+
+        update_tick(tick_lower, liquidity_desired, true)
+        update_tick(tick_upper, -liquidity_desired, true)
+
+        if(state.tick_current >= tick_lower && state.tick_current < tick_upper)
+            put(state { liquidity @ l = l + liquidity_desired })
+
+        let (fg0, fg1) = fee_growth_inside(tick_lower, tick_upper)
+        let pos_id = state.next_position_id
+        let pos = {
+            owner = Call.caller,
+            tick_lower = tick_lower,
+            tick_upper = tick_upper,
+            liquidity = liquidity_desired,
+            fee_growth_inside_last_0 = fg0,
+            fee_growth_inside_last_1 = fg1,
+            tokens_owed_0 = 0,
+            tokens_owed_1 = 0
+        }
+        put(state { positions[pos_id] = pos, next_position_id = pos_id + 1 })
+        Chain.event(PositionOpened(Call.caller, pos_id, tick_lower, tick_upper, liquidity_desired, a0, a1))
+        pos_id
+
+    stateful entrypoint close_position(position_id: int) : unit =
+        require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
+        let pos = state.positions[position_id]
+        require(Call.caller == pos.owner, "UNAUTHORIZED")
+
+        if(pos.liquidity > 0)
+            internal_decrease_liquidity(position_id, pos.liquidity)
+
+        let updated_pos = state.positions[position_id]
+        if(updated_pos.tokens_owed_0 > 0)
+            state.token0.transfer(Call.caller, updated_pos.tokens_owed_0)
+        if(updated_pos.tokens_owed_1 > 0)
+            state.token1.transfer(Call.caller, updated_pos.tokens_owed_1)
+
+        put(state { positions = Map.delete(position_id, state.positions) })
+        Chain.event(PositionClosed(Call.caller, position_id))
+
+    stateful entrypoint increase_liquidity(
+            position_id: int,
+            liquidity_delta: int,
+            amount_0_max: int,
+            amount_1_max: int
+        ) : (int * int) =
+        require(is_enabled(0), "POSITION_DISABLED")
+        require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
+        let pos = state.positions[position_id]
+        require(Call.caller == pos.owner, "UNAUTHORIZED")
+        require(liquidity_delta > 0, "ZERO_LIQUIDITY")
+
+        let sqrt_lower = TickMath.get_sqrt_price_at_tick(pos.tick_lower)
+        let sqrt_upper = TickMath.get_sqrt_price_at_tick(pos.tick_upper)
+
+        let (a0, a1) =
+            if(state.tick_current < pos.tick_lower)
+                (LiquidityMath.get_delta_amount_0(sqrt_lower, sqrt_upper, liquidity_delta, true), 0)
+            elif(state.tick_current >= pos.tick_upper)
+                (0, LiquidityMath.get_delta_amount_1(sqrt_lower, sqrt_upper, liquidity_delta, true))
+            else
+                (LiquidityMath.get_delta_amount_0(state.sqrt_price_x64, sqrt_upper, liquidity_delta, true),
+                 LiquidityMath.get_delta_amount_1(sqrt_lower, state.sqrt_price_x64, liquidity_delta, true))
+
+        require(a0 =< amount_0_max, "AMOUNT_0_EXCEEDED")
+        require(a1 =< amount_1_max, "AMOUNT_1_EXCEEDED")
+
+        if(a0 > 0) state.token0.transfer_allowance(Call.caller, Contract.address, a0)
+        if(a1 > 0) state.token1.transfer_allowance(Call.caller, Contract.address, a1)
+
+        let (fg0, fg1) = fee_growth_inside(pos.tick_lower, pos.tick_upper)
+        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / Q64
+        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / Q64
+
+        update_tick(pos.tick_lower, liquidity_delta, false)
+        update_tick(pos.tick_upper, -liquidity_delta, false)
+
+        if(state.tick_current >= pos.tick_lower && state.tick_current < pos.tick_upper)
+            put(state { liquidity @ l = l + liquidity_delta })
+
+        put(state { positions[position_id] = pos {
+            liquidity = pos.liquidity + liquidity_delta,
+            fee_growth_inside_last_0 = fg0,
+            fee_growth_inside_last_1 = fg1,
+            tokens_owed_0 = owed_0,
+            tokens_owed_1 = owed_1
+        }})
+        Chain.event(IncreaseLiquidity(position_id, liquidity_delta, a0, a1))
+        (a0, a1)
+
+    stateful entrypoint decrease_liquidity(
+            position_id: int,
+            liquidity_delta: int,
+            amount_0_min: int,
+            amount_1_min: int
+        ) : (int * int) =
+        require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
+        let pos = state.positions[position_id]
+        require(Call.caller == pos.owner, "UNAUTHORIZED")
+        require(liquidity_delta > 0, "ZERO_LIQUIDITY")
+        require(pos.liquidity >= liquidity_delta, "INSUFFICIENT_LIQUIDITY")
+
+        let (a0, a1) = internal_decrease_liquidity(position_id, liquidity_delta)
+        require(a0 >= amount_0_min, "SLIPPAGE_0")
+        require(a1 >= amount_1_min, "SLIPPAGE_1")
+        (a0, a1)
+
+    stateful entrypoint collect_fees(position_id: int, amount_0_max: int, amount_1_max: int) : (int * int) =
+        require(Map.member(position_id, state.positions), "POSITION_NOT_FOUND")
+        let pos = state.positions[position_id]
+        require(Call.caller == pos.owner, "UNAUTHORIZED")
+
+        let (fg0, fg1) = fee_growth_inside(pos.tick_lower, pos.tick_upper)
+        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / Q64
+        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / Q64
+
+        let collect_0 = Math.min(amount_0_max, owed_0)
+        let collect_1 = Math.min(amount_1_max, owed_1)
+
+        if(collect_0 > 0) state.token0.transfer(Call.caller, collect_0)
+        if(collect_1 > 0) state.token1.transfer(Call.caller, collect_1)
+
+        put(state { positions[position_id] = pos {
+            fee_growth_inside_last_0 = fg0,
+            fee_growth_inside_last_1 = fg1,
+            tokens_owed_0 = owed_0 - collect_0,
+            tokens_owed_1 = owed_1 - collect_1
+        }})
+        Chain.event(CollectFee(position_id, collect_0, collect_1))
+        (collect_0, collect_1)
+
+    // --- Swap ---
+
+    record swap_state = {
+        amount_remaining : int,
+        amount_calculated : int,
+        sqrt_price       : int,
+        tick             : int,
+        fee_growth_global: int,
+        protocol_fee     : int,
+        fund_fee         : int,
+        liq              : int,
+        ticks_crossed    : int
+    }
+
+    stateful entrypoint swap(
+            zero_for_one: bool,
+            amount_specified: int,
+            sqrt_price_limit_x64: int
+        ) : (int * int) =
+        require(is_enabled(2), "SWAP_DISABLED")
+        require(Chain.timestamp >= state.open_time, "NOT_OPEN")
+        require(amount_specified != 0, "ZERO_AMOUNT")
+
+        if(zero_for_one)
+            require(sqrt_price_limit_x64 < state.sqrt_price_x64, "LIMIT_TOO_HIGH")
+            require(sqrt_price_limit_x64 >= TickMath.min_sqrt_price, "LIMIT_TOO_LOW")
+        else
+            require(sqrt_price_limit_x64 > state.sqrt_price_x64, "LIMIT_TOO_LOW")
+            require(sqrt_price_limit_x64 =< TickMath.max_sqrt_price, "LIMIT_TOO_HIGH")
+
+        let is_exact_input = amount_specified > 0
+        let fee_cfg = state.config.get_config(state.config_index)
+
+        let initial = {
+            amount_remaining = Math.abs(amount_specified),
+            amount_calculated = 0,
+            sqrt_price = state.sqrt_price_x64,
+            tick = state.tick_current,
+            fee_growth_global = if(zero_for_one) state.fee_growth_global_0 else state.fee_growth_global_1,
+            protocol_fee = 0,
+            fund_fee = 0,
+            liq = state.liquidity,
+            ticks_crossed = 0
+        }
+
+        let final_s = swap_loop(initial, zero_for_one, is_exact_input, sqrt_price_limit_x64, fee_cfg)
+
+        if(zero_for_one)
+            put(state { sqrt_price_x64 = final_s.sqrt_price,
+                        tick_current = final_s.tick,
+                        liquidity = final_s.liq,
+                        fee_growth_global_0 = final_s.fee_growth_global,
+                        protocol_fees_0 @ f = f + final_s.protocol_fee,
+                        fund_fees_0 @ f = f + final_s.fund_fee })
+        else
+            put(state { sqrt_price_x64 = final_s.sqrt_price,
+                        tick_current = final_s.tick,
+                        liquidity = final_s.liq,
+                        fee_growth_global_1 = final_s.fee_growth_global,
+                        protocol_fees_1 @ f = f + final_s.protocol_fee,
+                        fund_fees_1 @ f = f + final_s.fund_fee })
+
+        let (amount_0, amount_1) =
+            if(is_exact_input)
+                let consumed = Math.abs(amount_specified) - final_s.amount_remaining
+                if(zero_for_one) (consumed, final_s.amount_calculated)
+                else (final_s.amount_calculated, consumed)
+            else
+                let produced = Math.abs(amount_specified) - final_s.amount_remaining
+                if(zero_for_one) (final_s.amount_calculated, produced)
+                else (produced, final_s.amount_calculated)
+
+        if(zero_for_one)
+            if(amount_0 > 0)
+                state.token0.transfer_allowance(Call.caller, Contract.address, amount_0)
+            if(amount_1 > 0)
+                state.token1.transfer(Call.caller, amount_1)
+        else
+            if(amount_1 > 0)
+                state.token1.transfer_allowance(Call.caller, Contract.address, amount_1)
+            if(amount_0 > 0)
+                state.token0.transfer(Call.caller, amount_0)
+
+        Chain.event(Swap(Call.caller, amount_0, amount_1, state.sqrt_price_x64, state.tick_current, state.liquidity))
+        (amount_0, amount_1)
+
+    // --- Swap loop (recursive) ---
+
+    function swap_loop(
+            s: swap_state,
+            zero_for_one: bool,
+            is_exact_input: bool,
+            price_limit: int,
+            fee_cfg: IDexConfig.fee_config
+        ) : swap_state =
+        if(s.amount_remaining == 0 || s.sqrt_price == price_limit || s.ticks_crossed >= MAX_TICKS_PER_SWAP)
+            s
+        else
+            let tick_offset = s.tick / state.tick_spacing
+            let next_opt = if(zero_for_one)
+                    BitMap.next_initialized_bit_lte(state.tick_bitmap, tick_offset)
+                else
+                    BitMap.next_initialized_bit_gte(state.tick_bitmap, tick_offset + 1)
+
+            let (tick_next, has_next) = switch(next_opt)
+                None => if(zero_for_one) (TickMath.min_tick, false) else (TickMath.max_tick, false)
+                Some(bit) => (bit * state.tick_spacing, true)
+
+            let tick_next_clamped = Math.max(TickMath.min_tick, Math.min(TickMath.max_tick, tick_next))
+            let sqrt_price_next = TickMath.get_sqrt_price_at_tick(tick_next_clamped)
+
+            let sqrt_price_target = if(zero_for_one)
+                    Math.max(sqrt_price_next, price_limit)
+                else
+                    Math.min(sqrt_price_next, price_limit)
+
+            let (new_sqrt_price, amount_in, amount_out, fee_amount) =
+                compute_swap_step(s.sqrt_price, sqrt_price_target, s.liq, s.amount_remaining, fee_cfg.trade_fee_rate, is_exact_input)
+
+            let s1 = if(is_exact_input)
+                    s { amount_remaining = s.amount_remaining - amount_in - fee_amount,
+                        amount_calculated = s.amount_calculated + amount_out }
+                else
+                    s { amount_remaining = s.amount_remaining - amount_out,
+                        amount_calculated = s.amount_calculated + amount_in + fee_amount }
+
+            let protocol_delta = fee_amount * fee_cfg.protocol_fee_rate / 1_000_000
+            let fund_delta = fee_amount * fee_cfg.fund_fee_rate / 1_000_000
+            let lp_fee = fee_amount - protocol_delta - fund_delta
+
+            let new_fee_growth = if(s1.liq > 0)
+                    s1.fee_growth_global + lp_fee * Q64 / s1.liq
+                else s1.fee_growth_global
+
+            let s2 = s1 { sqrt_price = new_sqrt_price,
+                          protocol_fee = s1.protocol_fee + protocol_delta,
+                          fund_fee = s1.fund_fee + fund_delta,
+                          fee_growth_global = new_fee_growth }
+
+            let s3 = if(new_sqrt_price == sqrt_price_next && has_next)
+                    let tick_data = Map.lookup_default(tick_next_clamped, state.ticks, default_tick())
+                    cross_tick(tick_next_clamped, s2.fee_growth_global, zero_for_one)
+                    let net_l = if(zero_for_one) -tick_data.liquidity_net else tick_data.liquidity_net
+                    s2 { liq = LiquidityMath.add_delta(s2.liq, net_l),
+                         tick = if(zero_for_one) tick_next_clamped - 1 else tick_next_clamped,
+                         ticks_crossed = s2.ticks_crossed + 1 }
+                else
+                    s2 { tick = TickMath.get_tick_at_sqrt_price(new_sqrt_price) }
+
+            swap_loop(s3, zero_for_one, is_exact_input, price_limit, fee_cfg)
+
+    function compute_swap_step(
+            sqrt_price_current: int,
+            sqrt_price_target: int,
+            liq: int,
+            amount_remaining: int,
+            fee_rate: int,
+            is_exact_input: bool
+        ) : (int * int * int * int) =
+        let zero_for_one = sqrt_price_target =< sqrt_price_current
+        if(is_exact_input)
+            let amount_remaining_less_fee = amount_remaining * (1_000_000 - fee_rate) / 1_000_000
+            let amount_in_max = if(zero_for_one)
+                    LiquidityMath.get_delta_amount_0(sqrt_price_target, sqrt_price_current, liq, true)
+                else
+                    LiquidityMath.get_delta_amount_1(sqrt_price_current, sqrt_price_target, liq, true)
+
+            if(amount_in_max =< amount_remaining_less_fee)
+                let amount_out = if(zero_for_one)
+                        LiquidityMath.get_delta_amount_1(sqrt_price_target, sqrt_price_current, liq, false)
+                    else
+                        LiquidityMath.get_delta_amount_0(sqrt_price_current, sqrt_price_target, liq, false)
+                let fee = Math.ceil_div(amount_in_max * fee_rate, 1_000_000 - fee_rate)
+                (sqrt_price_target, amount_in_max, amount_out, fee)
+            else
+                let new_sqrt_price = if(zero_for_one)
+                        LiquidityMath.get_next_sqrt_price_from_amount_0(sqrt_price_current, liq, amount_remaining_less_fee, true)
+                    else
+                        LiquidityMath.get_next_sqrt_price_from_amount_1(sqrt_price_current, liq, amount_remaining_less_fee, true)
+                let actual_in = if(zero_for_one)
+                        LiquidityMath.get_delta_amount_0(new_sqrt_price, sqrt_price_current, liq, true)
+                    else
+                        LiquidityMath.get_delta_amount_1(sqrt_price_current, new_sqrt_price, liq, true)
+                let actual_out = if(zero_for_one)
+                        LiquidityMath.get_delta_amount_1(new_sqrt_price, sqrt_price_current, liq, false)
+                    else
+                        LiquidityMath.get_delta_amount_0(sqrt_price_current, new_sqrt_price, liq, false)
+                let fee = amount_remaining - actual_in
+                (new_sqrt_price, actual_in, actual_out, fee)
+        else
+            let amount_out_max = if(zero_for_one)
+                    LiquidityMath.get_delta_amount_1(sqrt_price_target, sqrt_price_current, liq, false)
+                else
+                    LiquidityMath.get_delta_amount_0(sqrt_price_current, sqrt_price_target, liq, false)
+
+            if(amount_out_max =< amount_remaining)
+                let amount_in = if(zero_for_one)
+                        LiquidityMath.get_delta_amount_0(sqrt_price_target, sqrt_price_current, liq, true)
+                    else
+                        LiquidityMath.get_delta_amount_1(sqrt_price_current, sqrt_price_target, liq, true)
+                let fee = Math.ceil_div(amount_in * fee_rate, 1_000_000 - fee_rate)
+                (sqrt_price_target, amount_in, amount_out_max, fee)
+            else
+                let new_sqrt_price = if(zero_for_one)
+                        LiquidityMath.get_next_sqrt_price_from_amount_1(sqrt_price_current, liq, amount_remaining, false)
+                    else
+                        LiquidityMath.get_next_sqrt_price_from_amount_0(sqrt_price_current, liq, amount_remaining, false)
+                let actual_in = if(zero_for_one)
+                        LiquidityMath.get_delta_amount_0(new_sqrt_price, sqrt_price_current, liq, true)
+                    else
+                        LiquidityMath.get_delta_amount_1(sqrt_price_current, new_sqrt_price, liq, true)
+                let fee = Math.ceil_div(actual_in * fee_rate, 1_000_000 - fee_rate)
+                (new_sqrt_price, actual_in, amount_remaining, fee)
+
+    // --- Admin ---
+
+    stateful entrypoint collect_protocol_fee(amount_0_requested: int, amount_1_requested: int) : (int * int) =
+        require(Call.caller == state.config.protocol_owner(), "UNAUTHORIZED")
+        let a0 = Math.min(amount_0_requested, state.protocol_fees_0)
+        let a1 = Math.min(amount_1_requested, state.protocol_fees_1)
+        if(a0 > 0) state.token0.transfer(Call.caller, a0)
+        if(a1 > 0) state.token1.transfer(Call.caller, a1)
+        put(state { protocol_fees_0 @ f = f - a0, protocol_fees_1 @ f = f - a1 })
+        Chain.event(CollectProtocolFee(Call.caller, a0, a1))
+        (a0, a1)
+
+    stateful entrypoint collect_fund_fee(amount_0_requested: int, amount_1_requested: int) : (int * int) =
+        require(Call.caller == state.config.fund_owner(), "UNAUTHORIZED")
+        let a0 = Math.min(amount_0_requested, state.fund_fees_0)
+        let a1 = Math.min(amount_1_requested, state.fund_fees_1)
+        if(a0 > 0) state.token0.transfer(Call.caller, a0)
+        if(a1 > 0) state.token1.transfer(Call.caller, a1)
+        put(state { fund_fees_0 @ f = f - a0, fund_fees_1 @ f = f - a1 })
+        Chain.event(CollectFundFee(Call.caller, a0, a1))
+        (a0, a1)
+
+    stateful entrypoint update_pool_status(new_status: int) : unit =
+        require(Call.caller == state.config.admin(), "UNAUTHORIZED")
+        let old = state.status
+        put(state { status = new_status })
+        Chain.event(UpdatePoolStatus(old, new_status))
+
+    // --- Internal helpers ---
+
+    function default_tick() : tick_state =
+        { liquidity_net = 0, liquidity_gross = 0, fee_growth_outside_0 = 0, fee_growth_outside_1 = 0, initialized = false }
+
+    function is_enabled(bit: int) : bool =
+        (state.status band (1 bsl bit)) == 0
+
+    function fee_growth_inside(tick_lower: int, tick_upper: int) : (int * int) =
+        let lower_tick = Map.lookup_default(tick_lower, state.ticks, default_tick())
+        let upper_tick = Map.lookup_default(tick_upper, state.ticks, default_tick())
+
+        let (fee_below_0, fee_below_1) =
+            if(state.tick_current >= tick_lower)
+                (lower_tick.fee_growth_outside_0, lower_tick.fee_growth_outside_1)
+            else
+                (state.fee_growth_global_0 - lower_tick.fee_growth_outside_0,
+                 state.fee_growth_global_1 - lower_tick.fee_growth_outside_1)
+
+        let (fee_above_0, fee_above_1) =
+            if(state.tick_current < tick_upper)
+                (upper_tick.fee_growth_outside_0, upper_tick.fee_growth_outside_1)
+            else
+                (state.fee_growth_global_0 - upper_tick.fee_growth_outside_0,
+                 state.fee_growth_global_1 - upper_tick.fee_growth_outside_1)
+
+        (state.fee_growth_global_0 - fee_below_0 - fee_above_0,
+         state.fee_growth_global_1 - fee_below_1 - fee_above_1)
+
+    stateful function update_tick(tick_index: int, liquidity_delta: int, is_upper_inverted: bool) =
+        let tick = Map.lookup_default(tick_index, state.ticks, default_tick())
+        let was_initialized = tick.initialized
+        let new_gross = tick.liquidity_gross + Math.abs(liquidity_delta)
+        let new_net = tick.liquidity_net + liquidity_delta
+
+        let (fo0, fo1) = if(!was_initialized && new_gross > 0)
+                if(state.tick_current >= tick_index)
+                    (state.fee_growth_global_0, state.fee_growth_global_1)
+                else (0, 0)
+            else (tick.fee_growth_outside_0, tick.fee_growth_outside_1)
+
+        let new_initialized = new_gross > 0
+
+        if(!was_initialized && new_initialized)
+            put(state { tick_bitmap = BitMap.flip_bit(state.tick_bitmap, tick_index / state.tick_spacing) })
+        elif(was_initialized && !new_initialized)
+            put(state { tick_bitmap = BitMap.flip_bit(state.tick_bitmap, tick_index / state.tick_spacing) })
+
+        put(state { ticks[tick_index] = {
+            liquidity_net = new_net,
+            liquidity_gross = new_gross,
+            fee_growth_outside_0 = fo0,
+            fee_growth_outside_1 = fo1,
+            initialized = new_initialized
+        }})
+
+    stateful function cross_tick(tick_index: int, fee_growth_global_input: int, zero_for_one: bool) =
+        let tick = Map.lookup_default(tick_index, state.ticks, default_tick())
+        let new_outside_0 = state.fee_growth_global_0 - tick.fee_growth_outside_0
+        let new_outside_1 = state.fee_growth_global_1 - tick.fee_growth_outside_1
+        put(state { ticks[tick_index] = tick { fee_growth_outside_0 = new_outside_0, fee_growth_outside_1 = new_outside_1 } })
+
+    stateful function internal_decrease_liquidity(position_id: int, liquidity_delta: int) : (int * int) =
+        let pos = state.positions[position_id]
+        let sqrt_lower = TickMath.get_sqrt_price_at_tick(pos.tick_lower)
+        let sqrt_upper = TickMath.get_sqrt_price_at_tick(pos.tick_upper)
+
+        let (a0, a1) =
+            if(state.tick_current < pos.tick_lower)
+                (LiquidityMath.get_delta_amount_0(sqrt_lower, sqrt_upper, liquidity_delta, false), 0)
+            elif(state.tick_current >= pos.tick_upper)
+                (0, LiquidityMath.get_delta_amount_1(sqrt_lower, sqrt_upper, liquidity_delta, false))
+            else
+                (LiquidityMath.get_delta_amount_0(state.sqrt_price_x64, sqrt_upper, liquidity_delta, false),
+                 LiquidityMath.get_delta_amount_1(sqrt_lower, state.sqrt_price_x64, liquidity_delta, false))
+
+        let (fg0, fg1) = fee_growth_inside(pos.tick_lower, pos.tick_upper)
+        let owed_0 = pos.tokens_owed_0 + (fg0 - pos.fee_growth_inside_last_0) * pos.liquidity / Q64 + a0
+        let owed_1 = pos.tokens_owed_1 + (fg1 - pos.fee_growth_inside_last_1) * pos.liquidity / Q64 + a1
+
+        update_tick(pos.tick_lower, -liquidity_delta, true)
+        update_tick(pos.tick_upper, liquidity_delta, true)
+
+        if(state.tick_current >= pos.tick_lower && state.tick_current < pos.tick_upper)
+            put(state { liquidity @ l = l - liquidity_delta })
+
+        put(state { positions[position_id] = pos {
+            liquidity = pos.liquidity - liquidity_delta,
+            fee_growth_inside_last_0 = fg0,
+            fee_growth_inside_last_1 = fg1,
+            tokens_owed_0 = owed_0,
+            tokens_owed_1 = owed_1
+        }})
+        Chain.event(DecreaseLiquidity(position_id, liquidity_delta, a0, a1))
+        (a0, a1)
