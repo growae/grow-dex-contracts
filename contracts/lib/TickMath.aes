@@ -3,46 +3,46 @@
 include "./Math.aes"
 
 namespace TickMath =
-    let Q64 : int = 18446744073709551616
-    let MIN_TICK : int = -443636
-    let MAX_TICK : int = 443636
-    let MIN_SQRT_PRICE : int = 4295128739
-    let MAX_SQRT_PRICE : int = 79226673515401279992447579055
+    let q64 = 18446744073709551616
+    let min_tick = -443636
+    let max_tick = 443636
+    let min_sqrt_price = 4295048016
+    let max_sqrt_price = 79226673521066979257578248091
 
     function get_sqrt_price_at_tick(tick: int) : int =
-        require(tick >= MIN_TICK && tick =< MAX_TICK, "TICK_OOB")
+        require(tick >= min_tick && tick =< max_tick, "TICK_OOB")
         let abs_tick = Math.abs(tick)
-        let ratio = apply_multipliers(abs_tick, Q64)
+        let ratio = apply_multipliers(abs_tick, q64)
         if(tick > 0)
-            Q64 * Q64 / ratio
+            q64 * q64 / ratio
         else
             ratio
 
     private function apply_multipliers(abs_tick: int, ratio: int) : int =
-        let r = if((abs_tick band 0x1) != 0) ratio * 18445821805675392311 / Q64 else ratio
-        let r = if((abs_tick band 0x2) != 0) r * 18444899583751176498 / Q64 else r
-        let r = if((abs_tick band 0x4) != 0) r * 18443055278223354162 / Q64 else r
-        let r = if((abs_tick band 0x8) != 0) r * 18439367220938872655 / Q64 else r
-        let r = if((abs_tick band 0x10) != 0) r * 18431993317065449817 / Q64 else r
-        let r = if((abs_tick band 0x20) != 0) r * 18417254355718160513 / Q64 else r
-        let r = if((abs_tick band 0x40) != 0) r * 18387811781193591352 / Q64 else r
-        let r = if((abs_tick band 0x80) != 0) r * 18329067761203520168 / Q64 else r
-        let r = if((abs_tick band 0x100) != 0) r * 18212142134806087854 / Q64 else r
-        let r = if((abs_tick band 0x200) != 0) r * 17980523815641551639 / Q64 else r
-        let r = if((abs_tick band 0x400) != 0) r * 17526086738831147013 / Q64 else r
-        let r = if((abs_tick band 0x800) != 0) r * 16651378430235024244 / Q64 else r
-        let r = if((abs_tick band 0x1000) != 0) r * 15030750278693429944 / Q64 else r
-        let r = if((abs_tick band 0x2000) != 0) r * 12247334978882834399 / Q64 else r
-        let r = if((abs_tick band 0x4000) != 0) r * 8131365268884726200 / Q64 else r
-        let r = if((abs_tick band 0x8000) != 0) r * 3584323654723342297 / Q64 else r
-        let r = if((abs_tick band 0x10000) != 0) r * 696457651847595233 / Q64 else r
-        let r = if((abs_tick band 0x20000) != 0) r * 26294789957452057 / Q64 else r
-        let r = if((abs_tick band 0x40000) != 0) r * 37481735321082 / Q64 else r
+        let r = if((abs_tick band 0x1) != 0) ratio * 18445821805675392311 / q64 else ratio
+        let r = if((abs_tick band 0x2) != 0) r * 18444899583751176498 / q64 else r
+        let r = if((abs_tick band 0x4) != 0) r * 18443055278223354162 / q64 else r
+        let r = if((abs_tick band 0x8) != 0) r * 18439367220938872655 / q64 else r
+        let r = if((abs_tick band 0x10) != 0) r * 18431993317065449817 / q64 else r
+        let r = if((abs_tick band 0x20) != 0) r * 18417254355718160513 / q64 else r
+        let r = if((abs_tick band 0x40) != 0) r * 18387811781193591352 / q64 else r
+        let r = if((abs_tick band 0x80) != 0) r * 18329067761203520168 / q64 else r
+        let r = if((abs_tick band 0x100) != 0) r * 18212142134806087854 / q64 else r
+        let r = if((abs_tick band 0x200) != 0) r * 17980523815641551639 / q64 else r
+        let r = if((abs_tick band 0x400) != 0) r * 17526086738831147013 / q64 else r
+        let r = if((abs_tick band 0x800) != 0) r * 16651378430235024244 / q64 else r
+        let r = if((abs_tick band 0x1000) != 0) r * 15030750278693429944 / q64 else r
+        let r = if((abs_tick band 0x2000) != 0) r * 12247334978882834399 / q64 else r
+        let r = if((abs_tick band 0x4000) != 0) r * 8131365268884726200 / q64 else r
+        let r = if((abs_tick band 0x8000) != 0) r * 3584323654723342297 / q64 else r
+        let r = if((abs_tick band 0x10000) != 0) r * 696457651847595233 / q64 else r
+        let r = if((abs_tick band 0x20000) != 0) r * 26294789957452057 / q64 else r
+        let r = if((abs_tick band 0x40000) != 0) r * 37481735321082 / q64 else r
         r
 
     function get_tick_at_sqrt_price(sqrt_price: int) : int =
-        require(sqrt_price >= MIN_SQRT_PRICE && sqrt_price =< MAX_SQRT_PRICE, "PRICE_OOB")
-        binary_search_tick(sqrt_price, MIN_TICK, MAX_TICK)
+        require(sqrt_price >= min_sqrt_price && sqrt_price =< max_sqrt_price, "PRICE_OOB")
+        binary_search_tick(sqrt_price, min_tick, max_tick)
 
     private function binary_search_tick(target: int, low: int, high: int) : int =
         if(high - low =< 1)

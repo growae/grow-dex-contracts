@@ -1,8 +1,8 @@
 @compiler >= 8
 
 namespace Oracle =
-    let OBSERVATION_NUM : int = 100
-    let OBSERVATION_UPDATE_DURATION : int = 15
+    let observation_num = 100
+    let observation_update_duration = 15
 
     record observation = {
         block_timestamp    : int,
@@ -30,7 +30,7 @@ namespace Oracle =
                 cumulative_price_0 = new_cumulative_0,
                 cumulative_price_1 = new_cumulative_1
             }
-            let advance = time_delta >= OBSERVATION_UPDATE_DURATION
+            let advance = time_delta >= observation_update_duration
             (updated, advance)
 
     function get_twap_price_x32(obs_old: observation, obs_new: observation) : (int * int) =
