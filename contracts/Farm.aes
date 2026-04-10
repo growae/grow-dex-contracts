@@ -170,6 +170,24 @@ main contract Farm =
         Chain.event(RewardClaimed(farm_id, Call.caller, pending))
         pending
 
+    // Emergency unstake: returns LP tokens without claiming rewards (use when farm is underfunded)
+    stateful entrypoint emergency_withdraw(farm_id: int) : unit =
+        require(Map.member(farm_id, state.farms), "FARM_NOT_FOUND")
+        let farm = state.farms[farm_id]
+        let ui = get_user_info(farm_id, Call.caller)
+        require(ui.staked_amount > 0, "NO_STAKE")
+        let amount = ui.staked_amount
+        farm.lp_token.transfer(Call.caller, amount)
+        let updated_farm = state.farms[farm_id]
+        put(state {
+            farms[farm_id] = updated_farm { total_staked = updated_farm.total_staked - amount },
+            user_stakes[(farm_id, Call.caller)] = {
+                staked_amount = 0,
+                reward_debt = 0
+                }
+            })
+        Chain.event(Withdrawn(farm_id, Call.caller, amount))
+
     // MasterChef-style: accrues reward-per-share based on elapsed time and total staked
     stateful function update_farm(farm_id: int) : unit =
         let farm = state.farms[farm_id]
