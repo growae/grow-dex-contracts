@@ -1,0 +1,13 @@
+@compiler >= 8
+
+contract interface IAEX9 =
+    record meta_info = { name: string, symbol: string, decimals: int }
+    record allowance_accounts = { from_account: address, for_account: address }
+    entrypoint meta_info : () => meta_info
+    entrypoint total_supply : () => int
+    entrypoint balance : (address) => option(int)
+    entrypoint allowance : (allowance_accounts) => option(int)
+    stateful entrypoint transfer : (address, int) => unit
+    stateful entrypoint create_allowance : (address, int) => unit
+    stateful entrypoint change_allowance : (address, int) => unit
+    stateful entrypoint transfer_allowance : (address, address, int) => unit

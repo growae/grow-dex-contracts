@@ -1,0 +1,17 @@
+@compiler >= 8
+
+contract interface IDexConfig =
+    record fee_config = {
+        index            : int,
+        trade_fee_rate   : int,
+        protocol_fee_rate: int,
+        fund_fee_rate    : int,
+        creator_fee_rate : int,
+        create_pool_fee  : int,
+        tick_spacing     : int,
+        disabled         : bool
+    }
+    entrypoint get_config : (int) => fee_config
+    entrypoint protocol_owner : () => address
+    entrypoint fund_owner : () => address
+    entrypoint admin : () => address

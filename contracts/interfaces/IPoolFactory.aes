@@ -1,0 +1,9 @@
+@compiler >= 8
+
+include "./IAEX9.aes"
+include "./IPool.aes"
+
+contract interface IPoolFactory =
+    entrypoint get_pool : (IAEX9, IAEX9, int) => option(IPool)
+    entrypoint all_pools : () => list(IPool)
+    stateful entrypoint create_pool : (IAEX9, IAEX9, int, int, int) => IPool

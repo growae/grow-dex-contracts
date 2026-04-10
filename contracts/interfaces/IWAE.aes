@@ -1,0 +1,12 @@
+@compiler >= 8
+
+include "./IAEX9.aes"
+
+contract interface IWAE =
+    entrypoint meta_info : () => IAEX9.meta_info
+    entrypoint total_supply : () => int
+    entrypoint balance : (address) => option(int)
+    payable stateful entrypoint deposit : () => unit
+    payable stateful entrypoint deposit_to : (address) => unit
+    stateful entrypoint withdraw : (int) => unit
+    stateful entrypoint transfer : (address, int) => unit
