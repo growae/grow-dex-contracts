@@ -72,6 +72,8 @@ main contract PoolFactory =
             Chain.spend(state.admin, fee_cfg.create_pool_fee)
             let refund = Call.value - fee_cfg.create_pool_fee
             if(refund > 0) Chain.spend(Call.caller, refund)
+        elif(Call.value > 0)
+            Chain.spend(Call.caller, Call.value)
 
         let pool : IPool = Chain.clone(
             ref = state.pool_model,

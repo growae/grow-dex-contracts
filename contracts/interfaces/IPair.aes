@@ -20,6 +20,8 @@ contract interface IPair =
     entrypoint lp_total_supply : () => int
     // LP token balance for a given address
     entrypoint lp_balance : (address) => option(int)
+    // Transfers LP tokens from caller to recipient
+    stateful entrypoint transfer : (address, int) => unit
     // Deposits both tokens proportionally; returns minted LP amount (amount0, amount1, min_lp)
     stateful entrypoint deposit : (int, int, int) => int
     // Burns LP tokens and returns both underlying tokens (lp_amount, min_token0, min_token1)

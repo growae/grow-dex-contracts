@@ -12,10 +12,10 @@ import {
 
 chai.use(chaiAsPromised);
 
-const TRADE_FEE_RATE = 3000n;
-const PROTOCOL_FEE_RATE = 200000n;
-const FUND_FEE_RATE = 100000n;
-const CREATOR_FEE_RATE = 1000n;
+const TRADE_FEE_RATE = 2500n;
+const PROTOCOL_FEE_RATE = 120000n;
+const FUND_FEE_RATE = 40000n;
+const CREATOR_FEE_RATE = 500n;
 
 const DEPOSIT_AMOUNT = 10n ** 15n;
 const SWAP_AMOUNT = 10n ** 12n;
@@ -120,7 +120,7 @@ describe("Pair", () => {
     before(async () => {
       await token0.create_allowance(contractToAccount(pair.$options.address), DEPOSIT_AMOUNT);
       await token1.create_allowance(contractToAccount(pair.$options.address), DEPOSIT_AMOUNT);
-      depositResult = await pair.deposit(DEPOSIT_AMOUNT, DEPOSIT_AMOUNT);
+      depositResult = await pair.deposit(DEPOSIT_AMOUNT, DEPOSIT_AMOUNT, 0);
     });
 
     it("mints LP tokens equal to sqrt(a0*a1) - MINIMUM_LIQUIDITY", async () => {
@@ -166,7 +166,7 @@ describe("Pair", () => {
       totalSupplyBefore = (await pair.lp_total_supply()).decodedResult;
       await token0.create_allowance(contractToAccount(pair.$options.address), secondDeposit);
       await token1.create_allowance(contractToAccount(pair.$options.address), secondDeposit);
-      secondDepositResult = await pair.deposit(secondDeposit, secondDeposit);
+      secondDepositResult = await pair.deposit(secondDeposit, secondDeposit, 0);
     });
 
     it("mints proportional LP tokens", async () => {
@@ -537,7 +537,7 @@ describe("Pair", () => {
     });
 
     it("reverts deposit with zero amounts", async () => {
-      await expectRevert(pair.deposit(0, 0), "ZERO_DEPOSIT");
+      await expectRevert(pair.deposit(0, 0, 0), "ZERO_DEPOSIT");
     });
   });
 
@@ -563,7 +563,7 @@ describe("Pair", () => {
       await pair.update_pool_status(1);
       await token0.create_allowance(contractToAccount(pair.$options.address), 1000);
       await token1.create_allowance(contractToAccount(pair.$options.address), 1000);
-      await expectRevert(pair.deposit(1000, 1000), "DEPOSIT_DISABLED");
+      await expectRevert(pair.deposit(1000, 1000, 0), "DEPOSIT_DISABLED");
       await pair.update_pool_status(0);
     });
 

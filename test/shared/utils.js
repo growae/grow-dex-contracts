@@ -4,7 +4,7 @@ import { Contract, getFileSystem, decode, encode, Encoding } from "@aeternity/ae
 export const Q32 = 2n ** 32n;
 export const Q64 = 2n ** 64n;
 export const FEE_RATE_DENOMINATOR = 1_000_000n;
-export const MINIMUM_LIQUIDITY = 100n;
+export const MINIMUM_LIQUIDITY = 1000n;
 export const INITIAL_SUPPLY = 10n ** 18n;
 
 export function sqrt(value) {
