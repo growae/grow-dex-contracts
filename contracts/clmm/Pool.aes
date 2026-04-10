@@ -58,7 +58,7 @@ main contract Pool =
         fund_fees_0      : int,                        // Accrued fund fees in token0
         fund_fees_1      : int,                        // Accrued fund fees in token1
         ticks            : map(int, tick_state),       // Tick index → tick accounting state
-        tick_bitmap      : int,                        // Bitmap tracking which tick-spacing slots are initialized
+        tick_bitmap      : map(int, int),               // Word-map bitmap tracking initialized tick-spacing slots
         positions        : map(int, position),         // Position ID → position data
         next_position_id : int,                        // Auto-incrementing position ID counter
         status           : int,                        // Bitmask: bit 0 = positions, bit 2 = swaps (1 = disabled)
@@ -103,7 +103,7 @@ main contract Pool =
         fund_fees_0 = 0,
         fund_fees_1 = 0,
         ticks = {},
-        tick_bitmap = 0,
+        tick_bitmap = {},
         positions = {},
         next_position_id = 0,
         status = 0,
