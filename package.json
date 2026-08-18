@@ -5,7 +5,6 @@
   "scripts": {
     "test": "mocha './test/**/*.js' --timeout 0 --exit",
     "deploy:testnet": "node scripts/deploy.js --network testnet",
-    "deploy:mainnet": "node scripts/deploy.js --network mainnet",
     "generate-wallet": "node scripts/generate-wallet.js"
   },
   "type": "module",

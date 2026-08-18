@@ -106,10 +106,37 @@ cp .env.example .env
 
 # Deploy to testnet
 npm run deploy:testnet
-
-# Deploy to mainnet
-npm run deploy:mainnet
 ```
+
+### Deploying to another network
+
+**This repository targets testnet only.** It ships no mainnet script and no mainnet
+address table, by design — read the warning at the top of this file before going further.
+
+If you fork this project and decide to deploy it elsewhere, you supply the target
+yourself. Nothing here does it for you:
+
+```bash
+# Your node, your WAE contract, your key — all three are yours to provide
+export NODE_URL=https://your-node.example
+export WAE_ADDRESS=ct_...
+export SECRET_KEY=sk_...
+
+npm run deploy:testnet   # deploys against NODE_URL when it is set
+```
+
+| You provide | What it is |
+|---|---|
+| `NODE_URL` | the æternity node to deploy against |
+| `WAE_ADDRESS` | the Wrapped AE (AEX-9) contract on that network |
+| `SECRET_KEY` | the deployer account's key, funded on that network |
+
+`WAE.aes` in this repository is included for local testing. On any network where a
+canonical Wrapped AE already exists, point `WAE_ADDRESS` at that contract rather than
+deploying a second one.
+
+Whoever runs this against a live network is the operator of what results, and does so
+on their own account and their own responsibility.
 
 The deploy script handles the full deployment sequence automatically:
 
@@ -132,12 +159,13 @@ The deploy script handles the full deployment sequence automatically:
 
 ### WAE addresses
 
-Production WAE contracts (reused from existing deployments):
+The WAE contract this project reuses rather than deploying:
 
 | Network | WAE Address |
 |---------|-------------|
-| Mainnet | `ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa` |
 | Testnet | `ct_JDp175ruWd7mQggeHewSLS1PFXt9AzThCDaFedxon8mF8xTRF` |
+
+For any other network, set `WAE_ADDRESS` — see [Deploying to another network](#deploying-to-another-network).
 
 ## Stack
 

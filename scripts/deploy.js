@@ -6,9 +6,10 @@ import {
 } from '@aeternity/aepp-sdk';
 import { ADDRESSES } from '../deploy/addresses.js';
 
+// Testnet is the only network this repository targets. To deploy anywhere else,
+// supply your own node and WAE contract via NODE_URL and WAE_ADDRESS.
 const NETWORKS = {
   testnet: 'https://testnet.aeternity.io',
-  mainnet: 'https://mainnet.aeternity.io',
 };
 
 const COMPILER_URL = 'https://compiler.aeternity.io';
@@ -17,8 +18,10 @@ const network = process.argv.includes('--network')
   ? process.argv[process.argv.indexOf('--network') + 1]
   : 'testnet';
 
-if (!NETWORKS[network]) {
-  console.error(`Unknown network: ${network}. Use "testnet" or "mainnet".`);
+const nodeUrl = process.env.NODE_URL || NETWORKS[network];
+if (!nodeUrl) {
+  console.error(`Unknown network: ${network}. This repository ships a testnet target only.`);
+  console.error('To deploy to any other network, set NODE_URL and WAE_ADDRESS in your environment.');
   process.exit(1);
 }
 
@@ -91,7 +94,7 @@ async function deployContract(aeSdk, sourcePath, args = []) {
 
 async function deploy() {
   const account = new MemoryAccount(secretKey);
-  const node = new Node(NETWORKS[network]);
+  const node = new Node(nodeUrl);
   const compiler = new CompilerHttp(COMPILER_URL);
 
   const aeSdk = new AeSdk({
@@ -100,13 +103,13 @@ async function deploy() {
     onCompiler: compiler,
   });
 
-  const waeAddress = ADDRESSES[network]?.wae;
+  const waeAddress = process.env.WAE_ADDRESS || ADDRESSES[network]?.wae;
   if (!waeAddress) {
-    console.error(`No WAE address configured for ${network}. Update deploy/addresses.js.`);
+    console.error(`No WAE address configured for ${network}. Set WAE_ADDRESS in your environment.`);
     process.exit(1);
   }
 
-  console.log(`\nDeploying Grow DEX to ${network} (${NETWORKS[network]})`);
+  console.log(`\nDeploying Grow DEX to ${network} (${nodeUrl})`);
   console.log(`Deployer: ${account.address}`);
   console.log(`WAE:      ${waeAddress}\n`);
 
